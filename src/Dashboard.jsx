@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from './supabase';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 
-// --- FUNÇÃO AUXILIAR: Normaliza texto (Crucial para as Metas funcionarem) ---
+// --- FUNÇÃO AUXILIAR: Normaliza texto para comparar categorias ---
 const limparTexto = (texto) => {
   if (!texto) return '';
   return texto.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
@@ -12,13 +12,13 @@ export default function Dashboard({ session }) {
   const user = session.user;
   const [loading, setLoading] = useState(true);
 
-  // --- ESTADOS DE DADOS ---
+  // --- DADOS ---
   const [transacoes, setTransacoes] = useState([]);
   const [metas, setMetas] = useState([]);
-  const [fixas, setFixas] = useState([]);          // Despesas Fixas (Modelos)
-  const [receitasFixas, setReceitasFixas] = useState([]); // Receitas Fixas (Modelos)
+  const [fixas, setFixas] = useState([]);          
+  const [receitasFixas, setReceitasFixas] = useState([]); 
 
-  // --- FILTROS DE DATA ---
+  // --- DATAS ---
   const hoje = new Date().toISOString().split('T')[0];
   const [dataConsulta, setDataConsulta] = useState(hoje);
   const dataRef = new Date(dataConsulta);
@@ -28,14 +28,12 @@ export default function Dashboard({ session }) {
   // --- UI ---
   const [abaAtiva, setAbaAtiva] = useState('lancamentos');
 
-  // --- INPUTS DOS FORMULÁRIOS ---
+  // --- FORMULÁRIOS ---
   const [novoLancamento, setNovoLancamento] = useState({ 
     descricao: '', valor: '', tipo: 'despesa', categoria: '', taxa_retorno: '', origem: 'saldo' 
   });
   const [novaFixa, setNovaFixa] = useState({ descricao: '', valor: '', categoria: '' });
   const [novaReceitaFixa, setNovaReceitaFixa] = useState({ descricao: '', valor: '', categoria: '' });
-  
-  // O Estado da Meta que você queria de volta
   const [novaMeta, setNovaMeta] = useState({ categoria: '', valor_limite: '' });
 
   useEffect(() => { 
@@ -44,7 +42,7 @@ export default function Dashboard({ session }) {
     fetchReceitasFixas();
   }, []);
 
-  // --- BUSCAS NO BANCO ---
+  // --- BUSCAS ---
   async function fetchData() {
     setLoading(true);
     const { data: tData } = await supabase
@@ -69,14 +67,13 @@ export default function Dashboard({ session }) {
     if (data) setReceitasFixas(data);
   }
 
-  // --- LANÇAMENTOS (Diário) ---
+  // --- AÇÕES DE SALVAR ---
   async function handleSalvar(e) {
     e.preventDefault();
     if (!novoLancamento.descricao || !novoLancamento.valor) return alert("Preencha tudo!");
     
     const valorFloat = parseFloat(novoLancamento.valor);
 
-    // Lógica Aporte Externo
     if (novoLancamento.tipo === 'investimento' && novoLancamento.origem === 'novo') {
         await supabase.from('transacoes').insert({
           user_id: user.id, descricao: `Aporte: ${novoLancamento.descricao}`, valor: valorFloat, tipo: 'receita', categoria: 'Aporte Externo', data_transacao: new Date().toISOString()
@@ -97,127 +94,113 @@ export default function Dashboard({ session }) {
     fetchData();
   }
 
-  // --- CADASTROS DE FIXAS (Modelos) ---
-  async function handleSalvarFixa(e) {
-    e.preventDefault();
-    if (!novaFixa.descricao || !novaFixa.valor) return alert("Preencha tudo!");
-    await supabase.from('despesas_fixas').insert({
-      user_id: user.id, descricao: novaFixa.descricao, valor: parseFloat(novaFixa.valor), categoria: novaFixa.categoria || 'Fixa'
-    });
-    setNovaFixa({ descricao: '', valor: '', categoria: '' });
-    fetchFixas();
-    alert("Despesa Fixa salva!");
-  }
-
-  async function handleSalvarReceitaFixa(e) {
-    e.preventDefault();
-    if (!novaReceitaFixa.descricao || !novaReceitaFixa.valor) return alert("Preencha tudo!");
-    await supabase.from('receitas_fixas').insert({
-      user_id: user.id, descricao: novaReceitaFixa.descricao, valor: parseFloat(novaReceitaFixa.valor), categoria: novaReceitaFixa.categoria || 'Salário'
-    });
-    setNovaReceitaFixa({ descricao: '', valor: '', categoria: '' });
-    fetchReceitasFixas();
-    alert("Receita Fixa salva!");
-  }
-
-  // --- AÇÃO DE LANÇAR NO MÊS (O botão "Confirmar" mensal) ---
-  async function lancarFixasNoMes() {
-    if (confirm(`Lançar ${fixas.length} contas fixas como DESPESA hoje?`)) {
-      const novas = fixas.map(f => ({
-        user_id: user.id, descricao: f.descricao, valor: f.valor, tipo: 'despesa', categoria: f.categoria, data_transacao: new Date().toISOString()
-      }));
-      const { error } = await supabase.from('transacoes').insert(novas);
-      if (!error) { alert("Lançado!"); fetchData(); }
-    }
-  }
-
-  async function lancarReceitasFixasNoMes() {
-    if (confirm(`Lançar ${receitasFixas.length} receitas fixas como RECEITA hoje?`)) {
-      const novas = receitasFixas.map(r => ({
-        user_id: user.id, descricao: r.descricao, valor: r.valor, tipo: 'receita', categoria: r.categoria, data_transacao: new Date().toISOString()
-      }));
-      const { error } = await supabase.from('transacoes').insert(novas);
-      if (!error) { alert("Lançado!"); fetchData(); }
-    }
-  }
-
-  // --- GESTÃO DE METAS (O que estava faltando) ---
   async function handleCriarMeta(e) {
     e.preventDefault();
-    if (!novaMeta.categoria || !novaMeta.valor_limite) return alert("Preencha categoria e valor!");
-    
+    if (!novaMeta.categoria || !novaMeta.valor_limite) return alert("Preencha a meta!");
     await supabase.from('metas').insert({
-      user_id: user.id, 
-      categoria: novaMeta.categoria, 
-      valor_limite: parseFloat(novaMeta.valor_limite)
+      user_id: user.id, categoria: novaMeta.categoria, valor_limite: parseFloat(novaMeta.valor_limite)
     });
-    
     setNovaMeta({ categoria: '', valor_limite: '' });
-    fetchData(); // Atualiza para aparecer na lista imediatamente
+    fetchData();
+  }
+
+  async function handleSalvarFixa(e) { /* ... (mesma lógica anterior) ... */ 
+      e.preventDefault(); if(!novaFixa.descricao) return; 
+      await supabase.from('despesas_fixas').insert({ user_id: user.id, descricao: novaFixa.descricao, valor: parseFloat(novaFixa.valor), categoria: novaFixa.categoria || 'Fixa' });
+      setNovaFixa({descricao:'', valor:'', categoria:''}); fetchFixas();
+  }
+  async function handleSalvarReceitaFixa(e) { 
+      e.preventDefault(); if(!novaReceitaFixa.descricao) return;
+      await supabase.from('receitas_fixas').insert({ user_id: user.id, descricao: novaReceitaFixa.descricao, valor: parseFloat(novaReceitaFixa.valor), categoria: novaReceitaFixa.categoria || 'Salário' });
+      setNovaReceitaFixa({descricao:'', valor:'', categoria:''}); fetchReceitasFixas();
+  }
+
+  // --- AÇÕES DE LANÇAR NO MÊS ---
+  async function lancarFixasNoMes() {
+    if (confirm(`Lançar ${fixas.length} contas fixas como DESPESA hoje?`)) {
+      const novas = fixas.map(f => ({ user_id: user.id, descricao: f.descricao, valor: f.valor, tipo: 'despesa', categoria: f.categoria, data_transacao: new Date().toISOString() }));
+      await supabase.from('transacoes').insert(novas); fetchData();
+    }
+  }
+  async function lancarReceitasFixasNoMes() {
+    if (confirm(`Lançar ${receitasFixas.length} receitas fixas como RECEITA hoje?`)) {
+      const novas = receitasFixas.map(r => ({ user_id: user.id, descricao: r.descricao, valor: r.valor, tipo: 'receita', categoria: r.categoria, data_transacao: new Date().toISOString() }));
+      await supabase.from('transacoes').insert(novas); fetchData();
+    }
   }
 
   // --- EXCLUSÕES ---
-  async function handleExcluirMeta(id) { if(confirm("Apagar meta?")) { await supabase.from('metas').delete().eq('id', id); fetchData(); } }
-  async function handleExcluirTransacao(id) { if(confirm("Apagar?")) { await supabase.from('transacoes').delete().eq('id', id); fetchData(); } }
-  async function handleExcluirFixa(id) { if(confirm("Remover fixa?")) { await supabase.from('despesas_fixas').delete().eq('id', id); fetchFixas(); } }
-  async function handleExcluirReceitaFixa(id) { if(confirm("Remover receita?")) { await supabase.from('receitas_fixas').delete().eq('id', id); fetchReceitasFixas(); } }
+  async function handleExcluir(id, table) { 
+      if(confirm("Excluir item?")) { 
+          await supabase.from(table).delete().eq('id', id); 
+          if(table === 'transacoes') fetchData(); 
+          if(table === 'metas') fetchData();
+          if(table === 'despesas_fixas') fetchFixas();
+          if(table === 'receitas_fixas') fetchReceitasFixas();
+      } 
+  }
 
-  // --- CÁLCULOS MATEMÁTICOS ---
+  // --- CÁLCULOS MATEMÁTICOS E LÓGICA CORRIGIDA ---
 
-  // 1. Saldos e Totais Reais (Baseado no histórico)
+  // 1. Saldo Real (O que tem no banco agora)
   const totalReceitas = transacoes.filter(t => t.tipo === 'receita').reduce((acc, t) => acc + t.valor, 0);
   const totalInvestido = transacoes.filter(t => t.tipo === 'investimento').reduce((acc, t) => acc + t.valor, 0);
   const totalDespesasGeral = transacoes.filter(t => t.tipo === 'despesa').reduce((acc, t) => acc + t.valor, 0);
   const saldoConta = totalReceitas - totalDespesasGeral - totalInvestido;
 
+  // 2. Cálculo do "Restante da Meta" (A correção solicitada)
+  // Só subtrai da previsão o que AINDA NÃO FOI GASTO na meta.
+  const somaMetasRestantes = metas.reduce((acc, meta) => {
+      // Quanto já gastei nessa categoria neste mês?
+      const gastoNaCategoria = transacoes
+        .filter(t => {
+            const d = new Date(t.data_transacao);
+            return t.tipo === 'despesa' && 
+                   d.getMonth() === mesRef && 
+                   d.getFullYear() === anoRef &&
+                   limparTexto(t.categoria) === limparTexto(meta.categoria);
+        })
+        .reduce((sum, t) => sum + t.valor, 0);
+      
+      // Quanto falta gastar? (Se gastou mais que o limite, o restante é 0, não negativo)
+      const restante = Math.max(0, meta.valor_limite - gastoNaCategoria);
+      return acc + restante;
+  }, 0);
+
+  // 3. Previsão Final
+  // Saldo Atual - (O que ainda planejo gastar nas metas)
+  const previsaoCaixa = saldoConta - somaMetasRestantes;
+
+  // 4. Dados para gráficos
   const gastosDoMes = transacoes.filter(t => {
     const d = new Date(t.data_transacao);
     return t.tipo === 'despesa' && d.getMonth() === mesRef && d.getFullYear() === anoRef;
   }).reduce((acc, t) => acc + t.valor, 0);
 
-  // 2. Gráficos
   const dadosDespesas = transacoes.filter(t => t.tipo === 'despesa').reduce((acc, curr) => {
       const found = acc.find(item => item.name === curr.categoria);
       if (found) found.value += curr.valor; else acc.push({ name: curr.categoria, value: curr.valor });
       return acc;
     }, []);
-
-  const dadosPatrimonio = [
-    { name: 'Em Conta', value: saldoConta > 0 ? saldoConta : 0 },
-    { name: 'Investido', value: totalInvestido }
-  ];
-
+    
+  const dadosPatrimonio = [{ name: 'Em Conta', value: saldoConta > 0 ? saldoConta : 0 }, { name: 'Investido', value: totalInvestido }];
   const CORES_DESPESAS = ['#EF4444', '#F59E0B', '#10B981', '#3B82F6', '#8B5CF6', '#EC4899'];
   const CORES_PATRIMONIO = ['#10B981', '#3B82F6'];
-
-  // 3. PREVISÃO DE CAIXA (A Lógica que você pediu)
-  // Receita Fixa (Lançada) + Variáveis (Lançadas) - Metas - Despesas Fixas (Lançadas)
-  // Como 'SaldoConta' já contém (Receitas Lançadas - Despesas Lançadas), a conta simplifica para:
-  // Saldo Atual - Valor das Metas que eu ainda pretendo gastar.
-  // Mas para seguir sua lógica estrita de "Subtraído pelas metas":
-  const somaMetas = metas.reduce((acc, m) => acc + m.valor_limite, 0);
-  
-  // Vamos ser conservadores: Saldo que eu tenho HOJE - Tudo que planejei gastar (Metas)
-  const previsaoCaixa = saldoConta - somaMetas; 
-
   const inputClass = "w-full p-4 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:border-blue-500 transition text-base md:text-lg";
 
   return (
     <div className="min-h-screen bg-neutral-900 font-sans pb-24 text-gray-100">
       
-      {/* HEADER + PREVISÃO */}
+      {/* HEADER + PREVISÃO (ESTÉTICA ANTERIOR RESTAURADA) */}
       <div style={{ backgroundColor: '#C5A028' }} className="text-white pt-10 pb-20 px-4 md:px-6 rounded-b-[2rem] shadow-xl mb-[-3rem] relative z-10">
         <div className="max-w-5xl mx-auto mb-6 flex justify-between items-center">
-             <div>
-                <h1 className="text-2xl font-bold">Olá, Roger</h1>
-                <p className="text-xs text-white/80">Gestão Inteligente</p>
-             </div>
+             <div><h1 className="text-2xl font-bold">Olá, Roger</h1><p className="text-xs text-white/80">Gestão Inteligente</p></div>
              <button onClick={() => window.location.reload()} className="bg-white/20 p-2 rounded hover:bg-white/30">🔄</button>
         </div>
 
         {/* CARDS DE RESUMO */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 max-w-5xl mx-auto mb-6">
-          <CardResumo titulo="Saldo Atual" valor={saldoConta} cor="green" />
+          <CardResumo titulo="Saldo Real" valor={saldoConta} cor="green" />
           <CardResumo titulo="Gasto Mês" valor={gastosDoMes} cor="red" />
           <CardResumo titulo="Investido" valor={totalInvestido} cor="blue" />
           <CardResumo titulo="Patrimônio" valor={saldoConta + totalInvestido} cor="gold" bgDark />
@@ -226,27 +209,34 @@ export default function Dashboard({ session }) {
 
       <div className="px-3 md:px-4 max-w-5xl mx-auto space-y-6 pt-16">
         
-        {/* CARD DE PREVISÃO (Lógica Solicitada) */}
+        {/* CARD DE PREVISÃO (ESTILO BONITO + LÓGICA CORRIGIDA) */}
         <div className="bg-neutral-800 p-5 rounded-2xl shadow-lg border border-neutral-700">
-            <h3 className="text-sm font-bold text-gray-400 mb-4 flex items-center gap-2">🔮 Previsão (Saldo - Metas)</h3>
-            <div className="flex items-center justify-between bg-neutral-900/50 p-4 rounded-xl border border-neutral-700">
-                <div className="text-center">
-                    <p className="text-xs text-gray-500">Saldo Real</p>
+            <h3 className="text-sm font-bold text-gray-400 mb-4 flex items-center gap-2">🔮 Previsão de Caixa (Lógica Ajustada)</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-center">
+                
+                {/* O QUE FALTA GASTAR (Metas Restantes) */}
+                <div className="bg-neutral-900/50 p-3 rounded-xl border border-neutral-700">
+                    <p className="text-xs text-gray-500">A Gastar nas Metas</p>
+                    <p className="text-lg font-bold text-red-400">-{somaMetasRestantes.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</p>
+                </div>
+
+                {/* SALDO ATUAL */}
+                <div className="bg-neutral-900/50 p-3 rounded-xl border border-neutral-700">
+                    <p className="text-xs text-gray-500">Saldo Atual</p>
                     <p className="text-lg font-bold text-white">{saldoConta.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</p>
                 </div>
-                <span className="text-gray-600 font-bold">-</span>
-                <div className="text-center">
-                    <p className="text-xs text-gray-500">Metas</p>
-                    <p className="text-lg font-bold text-red-400">{somaMetas.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</p>
-                </div>
-                <span className="text-gray-600 font-bold">=</span>
-                <div className={`text-center p-2 rounded ${previsaoCaixa >= 0 ? 'bg-green-900/20' : 'bg-red-900/20'}`}>
-                    <p className="text-xs text-gray-400">Previsão</p>
+
+                {/* PREVISÃO FINAL */}
+                <div className={`p-3 rounded-xl border ${previsaoCaixa >= 0 ? 'bg-green-900/20 border-green-800' : 'bg-red-900/20 border-red-800'}`}>
+                    <p className="text-xs font-bold text-gray-400">Previsão Final</p>
                     <p className={`text-xl font-bold ${previsaoCaixa >= 0 ? 'text-green-400' : 'text-red-500'}`}>
                         {previsaoCaixa.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}
                     </p>
                 </div>
             </div>
+            <p className="text-[10px] text-center text-gray-500 mt-2">
+                * Considera seu saldo atual menos o que ainda falta preencher das suas metas.
+            </p>
         </div>
 
         {/* NAVEGAÇÃO ABAS */}
@@ -260,7 +250,9 @@ export default function Dashboard({ session }) {
         {/* --- ABA 1: DIÁRIO --- */}
         {abaAtiva === 'lancamentos' && (
           <div className="space-y-6">
-            <div className={`bg-white p-4 md:p-6 rounded-2xl shadow-lg border-t-4 text-gray-800 ${novoLancamento.tipo === 'receita' ? 'border-green-500' : 'border-red-500'}`}>
+            
+            {/* NOVO LANÇAMENTO */}
+            <div className={`bg-white p-4 md:p-6 rounded-2xl shadow-lg border-t-4 text-gray-800 ${novoLancamento.tipo === 'receita' ? 'border-green-500' : novoLancamento.tipo === 'investimento' ? 'border-blue-500' : 'border-red-500'}`}>
               <h2 className="text-lg font-bold text-gray-800 mb-4">🚀 Novo Lançamento</h2>
               <form onSubmit={handleSalvar}>
                 <div className="flex gap-2 mb-4">
@@ -271,34 +263,29 @@ export default function Dashboard({ session }) {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <input type="text" placeholder="Descrição" className={inputClass} value={novoLancamento.descricao} onChange={e => setNovoLancamento({ ...novoLancamento, descricao: e.target.value })} />
                     <input type="number" placeholder="Valor" className={inputClass} value={novoLancamento.valor} onChange={e => setNovoLancamento({ ...novoLancamento, valor: e.target.value })} />
-                    <input type="text" list="sugestoes" placeholder="Categoria" className={inputClass} value={novoLancamento.categoria} onChange={e => setNovoLancamento({ ...novoLancamento, categoria: e.target.value })} />
+                    <input type="text" list="sugestoes" placeholder="Categoria (Igual à Meta)" className={inputClass} value={novoLancamento.categoria} onChange={e => setNovoLancamento({ ...novoLancamento, categoria: e.target.value })} />
                     <datalist id="sugestoes"><option value="Alimentação"/><option value="Transporte"/><option value="Lazer"/><option value="Casa"/></datalist>
                 </div>
                 <button className="w-full mt-4 bg-neutral-800 text-white py-4 rounded-xl font-bold hover:bg-neutral-700">Confirmar Lançamento</button>
               </form>
             </div>
 
-            {/* Gráficos Resumidos */}
+            {/* GRÁFICOS */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <GraficoCard titulo="Patrimônio" dados={dadosPatrimonio} cores={CORES_PATRIMONIO} corBorda="gold" />
                 <GraficoCard titulo="Gastos por Categoria" dados={dadosDespesas} cores={CORES_DESPESAS} corBorda="red" />
             </div>
             
-            {/* Lista Histórico */}
+            {/* HISTÓRICO */}
             <div className="bg-white rounded-xl shadow p-4 text-gray-800">
                 <h3 className="font-bold mb-3">Últimas Movimentações</h3>
                 <div className="space-y-2 max-h-60 overflow-y-auto">
                     {transacoes.map(t => (
                         <div key={t.id} className="flex justify-between items-center border-b py-2 text-sm">
-                            <div>
-                                <p className="font-bold">{t.descricao}</p>
-                                <p className="text-xs text-gray-500">{new Date(t.data_transacao).toLocaleDateString()} - {t.categoria}</p>
-                            </div>
+                            <div><p className="font-bold">{t.descricao}</p><p className="text-xs text-gray-500">{new Date(t.data_transacao).toLocaleDateString()} - {t.categoria}</p></div>
                             <div className="text-right">
-                                <p className={`font-bold ${t.tipo === 'receita' ? 'text-green-600' : 'text-red-500'}`}>
-                                    {t.tipo === 'receita' ? '+' : '-'} R$ {t.valor}
-                                </p>
-                                <button onClick={() => handleExcluirTransacao(t.id)} className="text-xs text-red-400">Excluir</button>
+                                <p className={`font-bold ${t.tipo === 'receita' ? 'text-green-600' : t.tipo === 'investimento' ? 'text-blue-600' : 'text-red-500'}`}>{t.tipo === 'receita' ? '+' : '-'} R$ {t.valor}</p>
+                                <button onClick={() => handleExcluir(t.id, 'transacoes')} className="text-xs text-red-400">Excluir</button>
                             </div>
                         </div>
                     ))}
@@ -307,64 +294,32 @@ export default function Dashboard({ session }) {
           </div>
         )}
 
-        {/* --- ABA 2: RECEITAS FIXAS --- */}
+        {/* --- ABA 2 e 3: FIXAS E RECEITAS (SIMPLIFICADO PARA FOCAR NA META) --- */}
         {abaAtiva === 'receitas' && (
             <div className="bg-white p-6 rounded-2xl text-gray-800">
-                <div className="flex justify-between items-center mb-6">
-                    <h2 className="text-xl font-bold">💰 Receitas Fixas</h2>
-                    <button onClick={lancarReceitasFixasNoMes} className="bg-green-600 text-white px-4 py-2 rounded font-bold text-sm hover:bg-green-700">Lançar no Mês</button>
-                </div>
-                <form onSubmit={handleSalvarReceitaFixa} className="flex gap-2 mb-6">
-                    <input className="border p-2 rounded flex-1" placeholder="Ex: Salário" value={novaReceitaFixa.descricao} onChange={e => setNovaReceitaFixa({...novaReceitaFixa, descricao: e.target.value})} />
-                    <input className="border p-2 rounded w-24" type="number" placeholder="R$" value={novaReceitaFixa.valor} onChange={e => setNovaReceitaFixa({...novaReceitaFixa, valor: e.target.value})} />
-                    <button className="bg-green-600 text-white p-2 rounded">Salvar</button>
-                </form>
-                {receitasFixas.map(r => (
-                    <div key={r.id} className="flex justify-between p-3 bg-gray-50 border-b mb-2 rounded">
-                        <span>{r.descricao}</span>
-                        <div className="flex gap-4">
-                            <span className="font-bold text-green-600">R$ {r.valor}</span>
-                            <button onClick={() => handleExcluirReceitaFixa(r.id)}>🗑️</button>
-                        </div>
-                    </div>
-                ))}
+                <div className="flex justify-between items-center mb-6"><h2 className="text-xl font-bold">💰 Receitas Fixas</h2><button onClick={lancarReceitasFixasNoMes} className="bg-green-600 text-white px-4 py-2 rounded font-bold hover:bg-green-700">Lançar no Mês</button></div>
+                <form onSubmit={handleSalvarReceitaFixa} className="flex gap-2 mb-6"><input className="border p-2 rounded flex-1" placeholder="Ex: Salário" value={novaReceitaFixa.descricao} onChange={e => setNovaReceitaFixa({...novaReceitaFixa, descricao: e.target.value})} /><input className="border p-2 rounded w-24" type="number" placeholder="R$" value={novaReceitaFixa.valor} onChange={e => setNovaReceitaFixa({...novaReceitaFixa, valor: e.target.value})} /><button className="bg-green-600 text-white p-2 rounded">Salvar</button></form>
+                {receitasFixas.map(r => (<div key={r.id} className="flex justify-between p-3 bg-gray-50 border-b mb-2 rounded"><span>{r.descricao}</span><div className="flex gap-4"><span className="font-bold text-green-600">R$ {r.valor}</span><button onClick={() => handleExcluir(r.id, 'receitas_fixas')}>🗑️</button></div></div>))}
             </div>
         )}
-
-        {/* --- ABA 3: DESPESAS FIXAS --- */}
         {abaAtiva === 'fixas' && (
             <div className="bg-white p-6 rounded-2xl text-gray-800">
-                <div className="flex justify-between items-center mb-6">
-                    <h2 className="text-xl font-bold">⚙️ Despesas Fixas</h2>
-                    <button onClick={lancarFixasNoMes} className="bg-red-600 text-white px-4 py-2 rounded font-bold text-sm hover:bg-red-700">Lançar no Mês</button>
-                </div>
-                <form onSubmit={handleSalvarFixa} className="flex gap-2 mb-6">
-                    <input className="border p-2 rounded flex-1" placeholder="Ex: Aluguel" value={novaFixa.descricao} onChange={e => setNovaFixa({...novaFixa, descricao: e.target.value})} />
-                    <input className="border p-2 rounded w-24" type="number" placeholder="R$" value={novaFixa.valor} onChange={e => setNovaFixa({...novaFixa, valor: e.target.value})} />
-                    <button className="bg-red-600 text-white p-2 rounded">Salvar</button>
-                </form>
-                {fixas.map(f => (
-                    <div key={f.id} className="flex justify-between p-3 bg-gray-50 border-b mb-2 rounded">
-                        <span>{f.descricao}</span>
-                        <div className="flex gap-4">
-                            <span className="font-bold text-red-600">R$ {f.valor}</span>
-                            <button onClick={() => handleExcluirFixa(f.id)}>🗑️</button>
-                        </div>
-                    </div>
-                ))}
+                <div className="flex justify-between items-center mb-6"><h2 className="text-xl font-bold">⚙️ Despesas Fixas</h2><button onClick={lancarFixasNoMes} className="bg-red-600 text-white px-4 py-2 rounded font-bold hover:bg-red-700">Lançar no Mês</button></div>
+                <form onSubmit={handleSalvarFixa} className="flex gap-2 mb-6"><input className="border p-2 rounded flex-1" placeholder="Ex: Aluguel" value={novaFixa.descricao} onChange={e => setNovaFixa({...novaFixa, descricao: e.target.value})} /><input className="border p-2 rounded w-24" type="number" placeholder="R$" value={novaFixa.valor} onChange={e => setNovaFixa({...novaFixa, valor: e.target.value})} /><button className="bg-red-600 text-white p-2 rounded">Salvar</button></form>
+                {fixas.map(f => (<div key={f.id} className="flex justify-between p-3 bg-gray-50 border-b mb-2 rounded"><span>{f.descricao}</span><div className="flex gap-4"><span className="font-bold text-red-600">R$ {f.valor}</span><button onClick={() => handleExcluir(f.id, 'despesas_fixas')}>🗑️</button></div></div>))}
             </div>
         )}
 
-        {/* --- ABA 4: METAS (RESTAURADA) --- */}
+        {/* --- ABA 4: METAS DO MÊS (O QUE VOCÊ QUERIA DE VOLTA) --- */}
         {abaAtiva === 'metas' && (
             <div className="bg-white p-6 rounded-2xl shadow-lg border border-gray-200 text-gray-800">
                 <h2 className="text-xl font-bold mb-4">🎯 Controle de Metas</h2>
                 
-                {/* Formulário de Metas (Restaurado) */}
+                {/* Formulário de Criação (Como era antes) */}
                 <form onSubmit={handleCriarMeta} className="flex flex-col md:flex-row gap-3 mb-6 bg-blue-50 p-4 rounded-xl border border-blue-100">
                     <input 
                         type="text" 
-                        placeholder="Categoria (Ex: Alimentação)" 
+                        placeholder="Categoria (Ex: Transporte)" 
                         className="flex-1 p-3 rounded border border-blue-200" 
                         value={novaMeta.categoria} 
                         onChange={e => setNovaMeta({...novaMeta, categoria: e.target.value})} 
@@ -383,7 +338,7 @@ export default function Dashboard({ session }) {
                     {metas.length === 0 && <p className="text-center text-gray-400">Nenhuma meta definida.</p>}
                     
                     {metas.map(meta => {
-                        // Lógica de cálculo da barra de progresso
+                        // Lógica de Barras de Progresso Visual
                         const gastoNaCategoria = transacoes
                             .filter(t => { 
                                 const d = new Date(t.data_transacao);
@@ -395,6 +350,7 @@ export default function Dashboard({ session }) {
                         
                         const porcentagem = Math.min(100, (gastoNaCategoria / meta.valor_limite) * 100);
                         const estourou = gastoNaCategoria > meta.valor_limite;
+                        const disponivel = meta.valor_limite - gastoNaCategoria;
 
                         return (
                             <div key={meta.id} className="p-4 bg-gray-50 rounded-xl border border-gray-200">
@@ -404,18 +360,23 @@ export default function Dashboard({ session }) {
                                         <span className={`font-bold ${estourou ? 'text-red-500' : 'text-gray-500'}`}>
                                             R$ {gastoNaCategoria.toFixed(2)} / {meta.valor_limite}
                                         </span>
-                                        <button onClick={() => handleExcluirMeta(meta.id)} className="text-gray-400 hover:text-red-600">🗑️</button>
+                                        <button onClick={() => handleExcluir(meta.id, 'metas')} className="text-gray-400 hover:text-red-600">🗑️</button>
                                     </div>
                                 </div>
                                 
-                                {/* Barra de Progresso Visual */}
-                                <div className="w-full bg-gray-200 rounded-full h-4 overflow-hidden relative">
+                                {/* Barra de Progresso */}
+                                <div className="w-full bg-gray-200 rounded-full h-4 overflow-hidden relative mb-1">
                                     <div 
                                         className={`h-full transition-all duration-500 ${estourou ? 'bg-red-500' : 'bg-green-500'}`} 
                                         style={{ width: `${porcentagem}%` }}
                                     ></div>
                                 </div>
-                                <p className="text-xs text-right mt-1 text-gray-400">{porcentagem.toFixed(1)}% do limite</p>
+                                <div className="flex justify-between text-xs text-gray-500">
+                                    <span>{porcentagem.toFixed(1)}% usado</span>
+                                    <span className={disponivel < 0 ? "text-red-500 font-bold" : "text-green-600 font-bold"}>
+                                        {disponivel < 0 ? `Estourou R$ ${Math.abs(disponivel).toFixed(2)}` : `Resta R$ ${disponivel.toFixed(2)}`}
+                                    </span>
+                                </div>
                             </div>
                         )
                     })}
@@ -428,6 +389,7 @@ export default function Dashboard({ session }) {
   );
 }
 
+// Componentes Visuais Auxiliares (Cards e Gráficos)
 function CardResumo({ titulo, valor, cor, bgDark }) {
     let style = bgDark ? 'bg-[#C5A028] text-white border-yellow-600' : `bg-white text-gray-800 border-${cor}-500`;
     return (
@@ -443,15 +405,17 @@ function GraficoCard({ titulo, dados, cores, corBorda }) {
         <div className={`bg-white p-4 rounded-xl shadow border-t-4 border-${corBorda}-500 text-gray-800`}>
              <h3 className="text-sm font-bold mb-2">{titulo}</h3>
              <div className="h-48 text-xs">
+                {dados.some(d=>d.value>0) ? (
                 <ResponsiveContainer>
                     <PieChart>
                         <Pie data={dados} innerRadius={40} outerRadius={60} paddingAngle={5} dataKey="value">
                             {dados.map((entry, index) => <Cell key={index} fill={cores[index % cores.length]} />)}
                         </Pie>
-                        <Tooltip />
+                        <Tooltip formatter={(val) => `R$ ${val}`} />
                         <Legend />
                     </PieChart>
                 </ResponsiveContainer>
+                ) : <div className="flex items-center justify-center h-full text-gray-400">Sem dados</div>}
              </div>
         </div>
     )
