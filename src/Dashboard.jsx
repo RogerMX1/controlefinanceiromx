@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from './supabase';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 
-// --- FUNÇÃO AUXILIAR: Normaliza texto para comparar categorias ---
+// --- FUNÇÃO AUXILIAR ---
 const limparTexto = (texto) => {
   if (!texto) return '';
   return texto.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
@@ -14,8 +14,9 @@ export default function Dashboard({ session }) {
 
   // --- DADOS ---
   const [transacoes, setTransacoes] = useState([]);
-  const [metas, setMetas] = useState([]);
-  const [fixas, setFixas] = useState([]);          
+  const [metas, setMetas] = useState([]);             // Metas ATIVAS (Mês Atual)
+  const [metasFixas, setMetasFixas] = useState([]);   // Metas MODELO (Recorrentes)
+  const [fixas, setFixas] = useState([]);             // Despesas Fixas
   const [receitasFixas, setReceitasFixas] = useState([]); 
 
   // --- DATAS ---
@@ -30,48 +31,38 @@ export default function Dashboard({ session }) {
 
   // --- FORMULÁRIOS ---
   const [novoLancamento, setNovoLancamento] = useState({ 
-    descricao: '', valor: '', tipo: 'despesa', categoria: '', taxa_retorno: '', origem: 'saldo' 
+    descricao: '', valor: '', tipo: 'despesa', categoria: '', origem: 'saldo' 
   });
+  // Inputs para cadastrar os modelos fixos e manuais
   const [novaFixa, setNovaFixa] = useState({ descricao: '', valor: '', categoria: '' });
   const [novaReceitaFixa, setNovaReceitaFixa] = useState({ descricao: '', valor: '', categoria: '' });
-  const [novaMeta, setNovaMeta] = useState({ categoria: '', valor_limite: '' });
+  const [novaMetaFixa, setNovaMetaFixa] = useState({ categoria: '', valor_limite: '' }); // Para o modelo fixo
+  const [novaMetaManual, setNovaMetaManual] = useState({ categoria: '', valor_limite: '' }); // Para o mês atual apenas
 
   useEffect(() => { 
     fetchData(); 
     fetchFixas(); 
     fetchReceitasFixas();
+    fetchMetasFixas(); 
   }, []);
 
   // --- BUSCAS ---
   async function fetchData() {
     setLoading(true);
-    const { data: tData } = await supabase
-        .from('transacoes')
-        .select('*')
-        .order('data_transacao', { ascending: false })
-        .limit(2000); 
+    const { data: tData } = await supabase.from('transacoes').select('*').order('data_transacao', { ascending: false }).limit(2000); 
     if (tData) setTransacoes(tData);
-    
     const { data: mData } = await supabase.from('metas').select('*');
     if (mData) setMetas(mData);
     setLoading(false);
   }
-
-  async function fetchFixas() {
-    const { data } = await supabase.from('despesas_fixas').select('*');
-    if (data) setFixas(data);
-  }
-
-  async function fetchReceitasFixas() {
-    const { data } = await supabase.from('receitas_fixas').select('*');
-    if (data) setReceitasFixas(data);
-  }
+  async function fetchFixas() { const { data } = await supabase.from('despesas_fixas').select('*'); if (data) setFixas(data); }
+  async function fetchReceitasFixas() { const { data } = await supabase.from('receitas_fixas').select('*'); if (data) setReceitasFixas(data); }
+  async function fetchMetasFixas() { const { data } = await supabase.from('metas_fixas').select('*'); if (data) setMetasFixas(data); }
 
   // --- AÇÕES DE SALVAR ---
   async function handleSalvar(e) {
     e.preventDefault();
     if (!novoLancamento.descricao || !novoLancamento.valor) return alert("Preencha tudo!");
-    
     const valorFloat = parseFloat(novoLancamento.valor);
 
     if (novoLancamento.tipo === 'investimento' && novoLancamento.origem === 'novo') {
@@ -79,32 +70,15 @@ export default function Dashboard({ session }) {
           user_id: user.id, descricao: `Aporte: ${novoLancamento.descricao}`, valor: valorFloat, tipo: 'receita', categoria: 'Aporte Externo', data_transacao: new Date().toISOString()
         });
     }
-
     await supabase.from('transacoes').insert({
-      user_id: user.id,
-      descricao: novoLancamento.descricao,
-      valor: valorFloat,
-      tipo: novoLancamento.tipo,
-      categoria: novoLancamento.categoria || 'Geral', 
-      taxa_retorno: novoLancamento.tipo === 'investimento' ? parseFloat(novoLancamento.taxa_retorno || 0) : 0,
-      data_transacao: new Date().toISOString()
+      user_id: user.id, descricao: novoLancamento.descricao, valor: valorFloat, tipo: novoLancamento.tipo, categoria: novoLancamento.categoria || 'Geral', data_transacao: new Date().toISOString()
     });
-    
-    setNovoLancamento({ ...novoLancamento, descricao: '', valor: '', taxa_retorno: '', categoria: '', origem: 'saldo' });
+    setNovoLancamento({ ...novoLancamento, descricao: '', valor: '', categoria: '', origem: 'saldo' });
     fetchData();
   }
 
-  async function handleCriarMeta(e) {
-    e.preventDefault();
-    if (!novaMeta.categoria || !novaMeta.valor_limite) return alert("Preencha a meta!");
-    await supabase.from('metas').insert({
-      user_id: user.id, categoria: novaMeta.categoria, valor_limite: parseFloat(novaMeta.valor_limite)
-    });
-    setNovaMeta({ categoria: '', valor_limite: '' });
-    fetchData();
-  }
-
-  async function handleSalvarFixa(e) { /* ... (mesma lógica anterior) ... */ 
+  // Salvar Modelos (Fixos)
+  async function handleSalvarFixa(e) { 
       e.preventDefault(); if(!novaFixa.descricao) return; 
       await supabase.from('despesas_fixas').insert({ user_id: user.id, descricao: novaFixa.descricao, valor: parseFloat(novaFixa.valor), categoria: novaFixa.categoria || 'Fixa' });
       setNovaFixa({descricao:'', valor:'', categoria:''}); fetchFixas();
@@ -114,8 +88,20 @@ export default function Dashboard({ session }) {
       await supabase.from('receitas_fixas').insert({ user_id: user.id, descricao: novaReceitaFixa.descricao, valor: parseFloat(novaReceitaFixa.valor), categoria: novaReceitaFixa.categoria || 'Salário' });
       setNovaReceitaFixa({descricao:'', valor:'', categoria:''}); fetchReceitasFixas();
   }
+  async function handleSalvarMetaFixa(e) {
+    e.preventDefault(); if(!novaMetaFixa.categoria) return;
+    await supabase.from('metas_fixas').insert({ user_id: user.id, categoria: novaMetaFixa.categoria, valor_limite: parseFloat(novaMetaFixa.valor_limite) });
+    setNovaMetaFixa({ categoria: '', valor_limite: '' }); fetchMetasFixas();
+  }
+  
+  // Salvar Meta Manual (Só no mês)
+  async function handleCriarMetaManual(e) {
+    e.preventDefault(); if(!novaMetaManual.categoria) return;
+    await supabase.from('metas').insert({ user_id: user.id, categoria: novaMetaManual.categoria, valor_limite: parseFloat(novaMetaManual.valor_limite) });
+    setNovaMetaManual({ categoria: '', valor_limite: '' }); fetchData();
+  }
 
-  // --- AÇÕES DE LANÇAR NO MÊS ---
+  // --- BOTÕES "LANÇAR NO MÊS" (A FASE) ---
   async function lancarFixasNoMes() {
     if (confirm(`Lançar ${fixas.length} contas fixas como DESPESA hoje?`)) {
       const novas = fixas.map(f => ({ user_id: user.id, descricao: f.descricao, valor: f.valor, tipo: 'despesa', categoria: f.categoria, data_transacao: new Date().toISOString() }));
@@ -128,164 +114,131 @@ export default function Dashboard({ session }) {
       await supabase.from('transacoes').insert(novas); fetchData();
     }
   }
+  async function lancarMetasFixasNoMes() {
+    if (confirm(`Lançar ${metasFixas.length} METAS para controle neste mês?`)) {
+      const novas = metasFixas.map(m => ({ user_id: user.id, categoria: m.categoria, valor_limite: m.valor_limite }));
+      await supabase.from('metas').insert(novas); fetchData();
+    }
+  }
 
-  // --- EXCLUSÕES ---
+  // --- EXCLUSÃO ---
   async function handleExcluir(id, table) { 
       if(confirm("Excluir item?")) { 
           await supabase.from(table).delete().eq('id', id); 
-          if(table === 'transacoes') fetchData(); 
-          if(table === 'metas') fetchData();
+          if(table === 'transacoes' || table === 'metas') fetchData(); 
           if(table === 'despesas_fixas') fetchFixas();
           if(table === 'receitas_fixas') fetchReceitasFixas();
+          if(table === 'metas_fixas') fetchMetasFixas();
       } 
   }
 
-  // --- CÁLCULOS MATEMÁTICOS E LÓGICA CORRIGIDA ---
-
-  // 1. Saldo Real (O que tem no banco agora)
+  // --- CÁLCULOS (PREVISÃO) ---
   const totalReceitas = transacoes.filter(t => t.tipo === 'receita').reduce((acc, t) => acc + t.valor, 0);
   const totalInvestido = transacoes.filter(t => t.tipo === 'investimento').reduce((acc, t) => acc + t.valor, 0);
   const totalDespesasGeral = transacoes.filter(t => t.tipo === 'despesa').reduce((acc, t) => acc + t.valor, 0);
   const saldoConta = totalReceitas - totalDespesasGeral - totalInvestido;
 
-  // 2. Cálculo do "Restante da Meta" (A correção solicitada)
-  // Só subtrai da previsão o que AINDA NÃO FOI GASTO na meta.
+  // Lógica: Saldo Atual - (Metas Ativas - Gasto Realizado nelas)
   const somaMetasRestantes = metas.reduce((acc, meta) => {
-      // Quanto já gastei nessa categoria neste mês?
-      const gastoNaCategoria = transacoes
-        .filter(t => {
+      const gastoNaCategoria = transacoes.filter(t => {
             const d = new Date(t.data_transacao);
-            return t.tipo === 'despesa' && 
-                   d.getMonth() === mesRef && 
-                   d.getFullYear() === anoRef &&
-                   limparTexto(t.categoria) === limparTexto(meta.categoria);
-        })
-        .reduce((sum, t) => sum + t.valor, 0);
-      
-      // Quanto falta gastar? (Se gastou mais que o limite, o restante é 0, não negativo)
-      const restante = Math.max(0, meta.valor_limite - gastoNaCategoria);
-      return acc + restante;
+            return t.tipo === 'despesa' && d.getMonth() === mesRef && d.getFullYear() === anoRef && limparTexto(t.categoria) === limparTexto(meta.categoria);
+      }).reduce((sum, t) => sum + t.valor, 0);
+      return acc + Math.max(0, meta.valor_limite - gastoNaCategoria);
   }, 0);
 
-  // 3. Previsão Final
-  // Saldo Atual - (O que ainda planejo gastar nas metas)
   const previsaoCaixa = saldoConta - somaMetasRestantes;
-
-  // 4. Dados para gráficos
-  const gastosDoMes = transacoes.filter(t => {
-    const d = new Date(t.data_transacao);
-    return t.tipo === 'despesa' && d.getMonth() === mesRef && d.getFullYear() === anoRef;
-  }).reduce((acc, t) => acc + t.valor, 0);
 
   const dadosDespesas = transacoes.filter(t => t.tipo === 'despesa').reduce((acc, curr) => {
       const found = acc.find(item => item.name === curr.categoria);
-      if (found) found.value += curr.valor; else acc.push({ name: curr.categoria, value: curr.valor });
-      return acc;
-    }, []);
+      if (found) found.value += curr.valor; else acc.push({ name: curr.categoria, value: curr.valor }); return acc;
+  }, []);
     
-  const dadosPatrimonio = [{ name: 'Em Conta', value: saldoConta > 0 ? saldoConta : 0 }, { name: 'Investido', value: totalInvestido }];
-  const CORES_DESPESAS = ['#EF4444', '#F59E0B', '#10B981', '#3B82F6', '#8B5CF6', '#EC4899'];
-  const CORES_PATRIMONIO = ['#10B981', '#3B82F6'];
-  const inputClass = "w-full p-4 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:border-blue-500 transition text-base md:text-lg";
+  const CORES_DESPESAS = ['#EF4444', '#F59E0B', '#10B981', '#3B82F6', '#8B5CF6'];
+  const inputClass = "w-full p-3 bg-gray-50 border border-gray-200 rounded-lg outline-none focus:border-blue-500 text-sm md:text-base";
 
   return (
     <div className="min-h-screen bg-neutral-900 font-sans pb-24 text-gray-100">
       
-      {/* HEADER + PREVISÃO (ESTÉTICA ANTERIOR RESTAURADA) */}
-      <div style={{ backgroundColor: '#C5A028' }} className="text-white pt-10 pb-20 px-4 md:px-6 rounded-b-[2rem] shadow-xl mb-[-3rem] relative z-10">
-        <div className="max-w-5xl mx-auto mb-6 flex justify-between items-center">
-             <div><h1 className="text-2xl font-bold">Olá, Roger</h1><p className="text-xs text-white/80">Gestão Inteligente</p></div>
+      {/* HEADER DOURADO/DARK */}
+      <div style={{ backgroundColor: '#C5A028' }} className="text-white pt-8 pb-16 px-4 rounded-b-[2rem] shadow-xl mb-[-3rem] relative z-10">
+        <div className="max-w-5xl mx-auto mb-4 flex justify-between items-center">
+             <div><h1 className="text-xl md:text-2xl font-bold">Olá, Roger</h1><p className="text-xs text-white/80">Gestão Inteligente</p></div>
              <button onClick={() => window.location.reload()} className="bg-white/20 p-2 rounded hover:bg-white/30">🔄</button>
         </div>
-
-        {/* CARDS DE RESUMO */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 max-w-5xl mx-auto mb-6">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 max-w-5xl mx-auto">
           <CardResumo titulo="Saldo Real" valor={saldoConta} cor="green" />
-          <CardResumo titulo="Gasto Mês" valor={gastosDoMes} cor="red" />
+          <CardResumo titulo="Gasto Mês" valor={totalDespesasGeral} cor="red" />
           <CardResumo titulo="Investido" valor={totalInvestido} cor="blue" />
           <CardResumo titulo="Patrimônio" valor={saldoConta + totalInvestido} cor="gold" bgDark />
         </div>
       </div>
 
-      <div className="px-3 md:px-4 max-w-5xl mx-auto space-y-6 pt-16">
+      <div className="px-3 max-w-5xl mx-auto space-y-5 pt-14">
         
-        {/* CARD DE PREVISÃO (ESTILO BONITO + LÓGICA CORRIGIDA) */}
-        <div className="bg-neutral-800 p-5 rounded-2xl shadow-lg border border-neutral-700">
-            <h3 className="text-sm font-bold text-gray-400 mb-4 flex items-center gap-2">🔮 Previsão de Caixa (Lógica Ajustada)</h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-center">
-                
-                {/* O QUE FALTA GASTAR (Metas Restantes) */}
+        {/* PREVISÃO */}
+        <div className="bg-neutral-800 p-4 rounded-2xl shadow-lg border border-neutral-700">
+            <h3 className="text-xs font-bold text-gray-400 mb-3 flex items-center gap-2">🔮 Previsão de Caixa</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-center">
                 <div className="bg-neutral-900/50 p-3 rounded-xl border border-neutral-700">
-                    <p className="text-xs text-gray-500">A Gastar nas Metas</p>
-                    <p className="text-lg font-bold text-red-400">-{somaMetasRestantes.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</p>
+                    <p className="text-[10px] text-gray-500 uppercase">Restante Metas</p>
+                    <p className="text-base font-bold text-red-400">-{somaMetasRestantes.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</p>
                 </div>
-
-                {/* SALDO ATUAL */}
                 <div className="bg-neutral-900/50 p-3 rounded-xl border border-neutral-700">
-                    <p className="text-xs text-gray-500">Saldo Atual</p>
-                    <p className="text-lg font-bold text-white">{saldoConta.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</p>
+                    <p className="text-[10px] text-gray-500 uppercase">Saldo Atual</p>
+                    <p className="text-base font-bold text-white">{saldoConta.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</p>
                 </div>
-
-                {/* PREVISÃO FINAL */}
                 <div className={`p-3 rounded-xl border ${previsaoCaixa >= 0 ? 'bg-green-900/20 border-green-800' : 'bg-red-900/20 border-red-800'}`}>
-                    <p className="text-xs font-bold text-gray-400">Previsão Final</p>
-                    <p className={`text-xl font-bold ${previsaoCaixa >= 0 ? 'text-green-400' : 'text-red-500'}`}>
+                    <p className="text-[10px] font-bold text-gray-400 uppercase">Previsão Final</p>
+                    <p className={`text-lg font-bold ${previsaoCaixa >= 0 ? 'text-green-400' : 'text-red-500'}`}>
                         {previsaoCaixa.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}
                     </p>
                 </div>
             </div>
-            <p className="text-[10px] text-center text-gray-500 mt-2">
-                * Considera seu saldo atual menos o que ainda falta preencher das suas metas.
-            </p>
         </div>
 
-        {/* NAVEGAÇÃO ABAS */}
-        <div className="flex justify-between gap-1 bg-neutral-800 p-1.5 rounded-xl max-w-2xl mx-auto overflow-hidden">
-          <button onClick={() => setAbaAtiva('lancamentos')} className={`flex-1 py-3 text-xs md:text-sm font-bold rounded-lg transition ${abaAtiva === 'lancamentos' ? 'bg-[#C5A028] text-white' : 'text-gray-400 hover:text-gray-200'}`}>Diário</button>
-          <button onClick={() => setAbaAtiva('receitas')} className={`flex-1 py-3 text-xs md:text-sm font-bold rounded-lg transition ${abaAtiva === 'receitas' ? 'bg-[#C5A028] text-white' : 'text-gray-400 hover:text-gray-200'}`}>Receitas</button>
-          <button onClick={() => setAbaAtiva('fixas')} className={`flex-1 py-3 text-xs md:text-sm font-bold rounded-lg transition ${abaAtiva === 'fixas' ? 'bg-[#C5A028] text-white' : 'text-gray-400 hover:text-gray-200'}`}>Desp. Fixas</button>
-          <button onClick={() => setAbaAtiva('metas')} className={`flex-1 py-3 text-xs md:text-sm font-bold rounded-lg transition ${abaAtiva === 'metas' ? 'bg-[#C5A028] text-white' : 'text-gray-400 hover:text-gray-200'}`}>METAS</button>
+        {/* NAVEGAÇÃO */}
+        <div className="flex justify-between gap-1 bg-neutral-800 p-1 rounded-xl max-w-full overflow-x-auto">
+          {['lancamentos', 'receitas', 'fixas', 'metas'].map(aba => (
+             <button key={aba} onClick={() => setAbaAtiva(aba)} className={`flex-1 min-w-[70px] py-2 text-[10px] md:text-sm font-bold rounded-lg transition ${abaAtiva === aba ? 'bg-[#C5A028] text-white' : 'text-gray-400 hover:text-gray-200 uppercase'}`}>
+                {aba === 'lancamentos' ? 'Diário' : aba === 'fixas' ? 'Desp. Fixas' : aba.toUpperCase()}
+             </button>
+          ))}
         </div>
 
-        {/* --- ABA 1: DIÁRIO --- */}
+        {/* --- ABA DIÁRIO --- */}
         {abaAtiva === 'lancamentos' && (
-          <div className="space-y-6">
-            
-            {/* NOVO LANÇAMENTO */}
-            <div className={`bg-white p-4 md:p-6 rounded-2xl shadow-lg border-t-4 text-gray-800 ${novoLancamento.tipo === 'receita' ? 'border-green-500' : novoLancamento.tipo === 'investimento' ? 'border-blue-500' : 'border-red-500'}`}>
-              <h2 className="text-lg font-bold text-gray-800 mb-4">🚀 Novo Lançamento</h2>
+          <div className="space-y-4">
+            <div className={`bg-white p-4 rounded-2xl shadow border-t-4 text-gray-800 ${novoLancamento.tipo === 'receita' ? 'border-green-500' : 'border-red-500'}`}>
+              <h2 className="text-sm md:text-lg font-bold text-gray-800 mb-3">🚀 Novo Lançamento</h2>
               <form onSubmit={handleSalvar}>
-                <div className="flex gap-2 mb-4">
-                  <button type="button" onClick={() => setNovoLancamento({...novoLancamento, tipo: 'receita'})} className={`flex-1 py-2 font-bold rounded border ${novoLancamento.tipo === 'receita' ? 'bg-green-600 text-white' : 'text-gray-600'}`}>Receita</button>
-                  <button type="button" onClick={() => setNovoLancamento({...novoLancamento, tipo: 'despesa'})} className={`flex-1 py-2 font-bold rounded border ${novoLancamento.tipo === 'despesa' ? 'bg-red-600 text-white' : 'text-gray-600'}`}>Despesa</button>
-                  <button type="button" onClick={() => setNovoLancamento({...novoLancamento, tipo: 'investimento'})} className={`flex-1 py-2 font-bold rounded border ${novoLancamento.tipo === 'investimento' ? 'bg-blue-600 text-white' : 'text-gray-600'}`}>Invest.</button>
+                <div className="flex gap-2 mb-3">
+                  <button type="button" onClick={() => setNovoLancamento({...novoLancamento, tipo: 'receita'})} className={`flex-1 py-2 text-xs font-bold rounded border ${novoLancamento.tipo === 'receita' ? 'bg-green-600 text-white' : 'text-gray-600'}`}>Receita</button>
+                  <button type="button" onClick={() => setNovoLancamento({...novoLancamento, tipo: 'despesa'})} className={`flex-1 py-2 text-xs font-bold rounded border ${novoLancamento.tipo === 'despesa' ? 'bg-red-600 text-white' : 'text-gray-600'}`}>Despesa</button>
+                  <button type="button" onClick={() => setNovoLancamento({...novoLancamento, tipo: 'investimento'})} className={`flex-1 py-2 text-xs font-bold rounded border ${novoLancamento.tipo === 'investimento' ? 'bg-blue-600 text-white' : 'text-gray-600'}`}>Invest.</button>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                     <input type="text" placeholder="Descrição" className={inputClass} value={novoLancamento.descricao} onChange={e => setNovoLancamento({ ...novoLancamento, descricao: e.target.value })} />
                     <input type="number" placeholder="Valor" className={inputClass} value={novoLancamento.valor} onChange={e => setNovoLancamento({ ...novoLancamento, valor: e.target.value })} />
-                    <input type="text" list="sugestoes" placeholder="Categoria (Igual à Meta)" className={inputClass} value={novoLancamento.categoria} onChange={e => setNovoLancamento({ ...novoLancamento, categoria: e.target.value })} />
+                    <input type="text" list="sugestoes" placeholder="Categoria" className={inputClass} value={novoLancamento.categoria} onChange={e => setNovoLancamento({ ...novoLancamento, categoria: e.target.value })} />
                     <datalist id="sugestoes"><option value="Alimentação"/><option value="Transporte"/><option value="Lazer"/><option value="Casa"/></datalist>
                 </div>
-                <button className="w-full mt-4 bg-neutral-800 text-white py-4 rounded-xl font-bold hover:bg-neutral-700">Confirmar Lançamento</button>
+                <button className="w-full mt-3 bg-neutral-800 text-white py-3 rounded-lg font-bold hover:bg-neutral-700 text-sm">LANÇAR</button>
               </form>
             </div>
-
-            {/* GRÁFICOS */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <GraficoCard titulo="Patrimônio" dados={dadosPatrimonio} cores={CORES_PATRIMONIO} corBorda="gold" />
-                <GraficoCard titulo="Gastos por Categoria" dados={dadosDespesas} cores={CORES_DESPESAS} corBorda="red" />
-            </div>
             
-            {/* HISTÓRICO */}
             <div className="bg-white rounded-xl shadow p-4 text-gray-800">
-                <h3 className="font-bold mb-3">Últimas Movimentações</h3>
-                <div className="space-y-2 max-h-60 overflow-y-auto">
+                <h3 className="font-bold text-sm mb-3">Últimas Movimentações</h3>
+                <div className="space-y-2 max-h-64 overflow-y-auto">
                     {transacoes.map(t => (
-                        <div key={t.id} className="flex justify-between items-center border-b py-2 text-sm">
-                            <div><p className="font-bold">{t.descricao}</p><p className="text-xs text-gray-500">{new Date(t.data_transacao).toLocaleDateString()} - {t.categoria}</p></div>
+                        <div key={t.id} className="flex justify-between items-center border-b py-2 text-sm last:border-0">
+                            <div className="max-w-[60%]">
+                                <p className="font-bold truncate">{t.descricao}</p>
+                                <p className="text-[10px] text-gray-500">{new Date(t.data_transacao).toLocaleDateString()} - {t.categoria}</p>
+                            </div>
                             <div className="text-right">
-                                <p className={`font-bold ${t.tipo === 'receita' ? 'text-green-600' : t.tipo === 'investimento' ? 'text-blue-600' : 'text-red-500'}`}>{t.tipo === 'receita' ? '+' : '-'} R$ {t.valor}</p>
-                                <button onClick={() => handleExcluir(t.id, 'transacoes')} className="text-xs text-red-400">Excluir</button>
+                                <p className={`font-bold ${t.tipo === 'receita' ? 'text-green-600' : 'text-red-500'}`}>{t.tipo === 'receita' ? '+' : '-'} {t.valor}</p>
+                                <button onClick={() => handleExcluir(t.id, 'transacoes')} className="text-[10px] text-red-400 p-1">Excluir</button>
                             </div>
                         </div>
                     ))}
@@ -294,129 +247,164 @@ export default function Dashboard({ session }) {
           </div>
         )}
 
-        {/* --- ABA 2 e 3: FIXAS E RECEITAS (SIMPLIFICADO PARA FOCAR NA META) --- */}
+        {/* --- ABA RECEITAS FIXAS (Mobile OK) --- */}
         {abaAtiva === 'receitas' && (
-            <div className="bg-white p-6 rounded-2xl text-gray-800">
-                <div className="flex justify-between items-center mb-6"><h2 className="text-xl font-bold">💰 Receitas Fixas</h2><button onClick={lancarReceitasFixasNoMes} className="bg-green-600 text-white px-4 py-2 rounded font-bold hover:bg-green-700">Lançar no Mês</button></div>
-                <form onSubmit={handleSalvarReceitaFixa} className="flex gap-2 mb-6"><input className="border p-2 rounded flex-1" placeholder="Ex: Salário" value={novaReceitaFixa.descricao} onChange={e => setNovaReceitaFixa({...novaReceitaFixa, descricao: e.target.value})} /><input className="border p-2 rounded w-24" type="number" placeholder="R$" value={novaReceitaFixa.valor} onChange={e => setNovaReceitaFixa({...novaReceitaFixa, valor: e.target.value})} /><button className="bg-green-600 text-white p-2 rounded">Salvar</button></form>
-                {receitasFixas.map(r => (<div key={r.id} className="flex justify-between p-3 bg-gray-50 border-b mb-2 rounded"><span>{r.descricao}</span><div className="flex gap-4"><span className="font-bold text-green-600">R$ {r.valor}</span><button onClick={() => handleExcluir(r.id, 'receitas_fixas')}>🗑️</button></div></div>))}
-            </div>
-        )}
-        {abaAtiva === 'fixas' && (
-            <div className="bg-white p-6 rounded-2xl text-gray-800">
-                <div className="flex justify-between items-center mb-6"><h2 className="text-xl font-bold">⚙️ Despesas Fixas</h2><button onClick={lancarFixasNoMes} className="bg-red-600 text-white px-4 py-2 rounded font-bold hover:bg-red-700">Lançar no Mês</button></div>
-                <form onSubmit={handleSalvarFixa} className="flex gap-2 mb-6"><input className="border p-2 rounded flex-1" placeholder="Ex: Aluguel" value={novaFixa.descricao} onChange={e => setNovaFixa({...novaFixa, descricao: e.target.value})} /><input className="border p-2 rounded w-24" type="number" placeholder="R$" value={novaFixa.valor} onChange={e => setNovaFixa({...novaFixa, valor: e.target.value})} /><button className="bg-red-600 text-white p-2 rounded">Salvar</button></form>
-                {fixas.map(f => (<div key={f.id} className="flex justify-between p-3 bg-gray-50 border-b mb-2 rounded"><span>{f.descricao}</span><div className="flex gap-4"><span className="font-bold text-red-600">R$ {f.valor}</span><button onClick={() => handleExcluir(f.id, 'despesas_fixas')}>🗑️</button></div></div>))}
-            </div>
-        )}
+            <div className="bg-white p-4 rounded-2xl text-gray-800 shadow">
+                {/* Cabeçalho Responsivo */}
+                <div className="flex flex-col gap-3 mb-4 border-b pb-4">
+                    <h2 className="text-lg font-bold text-green-700">💰 Receitas Fixas</h2>
+                    <p className="text-xs text-gray-500">Modelos de entradas mensais (Salário, Aluguel).</p>
+                    <button onClick={lancarReceitasFixasNoMes} className="bg-green-600 text-white w-full py-3 rounded-lg font-bold text-sm shadow hover:bg-green-700 active:scale-95 transition">
+                        ⬇ LANÇAR NO MÊS ATUAL
+                    </button>
+                </div>
 
-        {/* --- ABA 4: METAS DO MÊS (O QUE VOCÊ QUERIA DE VOLTA) --- */}
-        {abaAtiva === 'metas' && (
-            <div className="bg-white p-6 rounded-2xl shadow-lg border border-gray-200 text-gray-800">
-                <h2 className="text-xl font-bold mb-4">🎯 Controle de Metas</h2>
-                
-                {/* Formulário de Criação (Como era antes) */}
-                <form onSubmit={handleCriarMeta} className="flex flex-col md:flex-row gap-3 mb-6 bg-blue-50 p-4 rounded-xl border border-blue-100">
-                    <input 
-                        type="text" 
-                        placeholder="Categoria (Ex: Transporte)" 
-                        className="flex-1 p-3 rounded border border-blue-200" 
-                        value={novaMeta.categoria} 
-                        onChange={e => setNovaMeta({...novaMeta, categoria: e.target.value})} 
-                    />
-                    <input 
-                        type="number" 
-                        placeholder="Limite Mensal (R$)" 
-                        className="w-full md:w-40 p-3 rounded border border-blue-200" 
-                        value={novaMeta.valor_limite} 
-                        onChange={e => setNovaMeta({...novaMeta, valor_limite: e.target.value})} 
-                    />
-                    <button className="bg-blue-600 text-white px-6 py-3 rounded font-bold hover:bg-blue-700">Criar Meta</button>
+                <form onSubmit={handleSalvarReceitaFixa} className="flex flex-col md:flex-row gap-2 mb-4 bg-gray-50 p-3 rounded-lg">
+                    <input className={`${inputClass} bg-white`} placeholder="Descrição (Ex: Salário)" value={novaReceitaFixa.descricao} onChange={e => setNovaReceitaFixa({...novaReceitaFixa, descricao: e.target.value})} />
+                    <input className={`${inputClass} md:w-32 bg-white`} type="number" placeholder="R$" value={novaReceitaFixa.valor} onChange={e => setNovaReceitaFixa({...novaReceitaFixa, valor: e.target.value})} />
+                    <button className="bg-green-600 text-white py-2 px-4 rounded-lg font-bold text-sm">Add</button>
                 </form>
 
-                <div className="space-y-4">
-                    {metas.length === 0 && <p className="text-center text-gray-400">Nenhuma meta definida.</p>}
-                    
-                    {metas.map(meta => {
-                        // Lógica de Barras de Progresso Visual
-                        const gastoNaCategoria = transacoes
-                            .filter(t => { 
-                                const d = new Date(t.data_transacao);
-                                return t.tipo === 'despesa' && 
-                                       d.getMonth() === mesRef && 
-                                       limparTexto(t.categoria) === limparTexto(meta.categoria); 
-                            })
-                            .reduce((acc, t) => acc + t.valor, 0);
-                        
-                        const porcentagem = Math.min(100, (gastoNaCategoria / meta.valor_limite) * 100);
-                        const estourou = gastoNaCategoria > meta.valor_limite;
-                        const disponivel = meta.valor_limite - gastoNaCategoria;
-
-                        return (
-                            <div key={meta.id} className="p-4 bg-gray-50 rounded-xl border border-gray-200">
-                                <div className="flex justify-between items-center mb-2">
-                                    <span className="font-bold text-gray-700 capitalize text-lg">{meta.categoria}</span>
-                                    <div className="flex items-center gap-3">
-                                        <span className={`font-bold ${estourou ? 'text-red-500' : 'text-gray-500'}`}>
-                                            R$ {gastoNaCategoria.toFixed(2)} / {meta.valor_limite}
-                                        </span>
-                                        <button onClick={() => handleExcluir(meta.id, 'metas')} className="text-gray-400 hover:text-red-600">🗑️</button>
-                                    </div>
-                                </div>
-                                
-                                {/* Barra de Progresso */}
-                                <div className="w-full bg-gray-200 rounded-full h-4 overflow-hidden relative mb-1">
-                                    <div 
-                                        className={`h-full transition-all duration-500 ${estourou ? 'bg-red-500' : 'bg-green-500'}`} 
-                                        style={{ width: `${porcentagem}%` }}
-                                    ></div>
-                                </div>
-                                <div className="flex justify-between text-xs text-gray-500">
-                                    <span>{porcentagem.toFixed(1)}% usado</span>
-                                    <span className={disponivel < 0 ? "text-red-500 font-bold" : "text-green-600 font-bold"}>
-                                        {disponivel < 0 ? `Estourou R$ ${Math.abs(disponivel).toFixed(2)}` : `Resta R$ ${disponivel.toFixed(2)}`}
-                                    </span>
-                                </div>
+                <div className="space-y-2">
+                    {receitasFixas.map(r => (
+                        <div key={r.id} className="flex justify-between items-center p-3 bg-green-50 rounded-lg border border-green-100">
+                            <span className="font-bold text-sm">{r.descricao}</span>
+                            <div className="flex items-center gap-3">
+                                <span className="font-bold text-green-700">R$ {r.valor}</span>
+                                <button onClick={() => handleExcluir(r.id, 'receitas_fixas')} className="text-red-400 text-xs">🗑️</button>
                             </div>
-                        )
-                    })}
+                        </div>
+                    ))}
                 </div>
             </div>
         )}
 
+        {/* --- ABA DESPESAS FIXAS (Mobile OK) --- */}
+        {abaAtiva === 'fixas' && (
+            <div className="bg-white p-4 rounded-2xl text-gray-800 shadow">
+                {/* Cabeçalho Responsivo */}
+                <div className="flex flex-col gap-3 mb-4 border-b pb-4">
+                    <h2 className="text-lg font-bold text-red-700">⚙️ Despesas Fixas</h2>
+                    <p className="text-xs text-gray-500">Modelos de contas mensais (Luz, Internet).</p>
+                    <button onClick={lancarFixasNoMes} className="bg-red-600 text-white w-full py-3 rounded-lg font-bold text-sm shadow hover:bg-red-700 active:scale-95 transition">
+                        ⬇ LANÇAR NO MÊS ATUAL
+                    </button>
+                </div>
+
+                <form onSubmit={handleSalvarFixa} className="flex flex-col md:flex-row gap-2 mb-4 bg-gray-50 p-3 rounded-lg">
+                    <input className={`${inputClass} bg-white`} placeholder="Descrição (Ex: Internet)" value={novaFixa.descricao} onChange={e => setNovaFixa({...novaFixa, descricao: e.target.value})} />
+                    <input className={`${inputClass} md:w-32 bg-white`} type="number" placeholder="R$" value={novaFixa.valor} onChange={e => setNovaFixa({...novaFixa, valor: e.target.value})} />
+                    <button className="bg-red-600 text-white py-2 px-4 rounded-lg font-bold text-sm">Add</button>
+                </form>
+
+                <div className="space-y-2">
+                    {fixas.map(f => (
+                        <div key={f.id} className="flex justify-between items-center p-3 bg-red-50 rounded-lg border border-red-100">
+                            <span className="font-bold text-sm">{f.descricao}</span>
+                            <div className="flex items-center gap-3">
+                                <span className="font-bold text-red-700">R$ {f.valor}</span>
+                                <button onClick={() => handleExcluir(f.id, 'despesas_fixas')} className="text-red-400 text-xs">🗑️</button>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        )}
+
+        {/* --- ABA METAS (Mobile OK + Lógica Completa) --- */}
+        {abaAtiva === 'metas' && (
+            <div className="bg-white p-4 rounded-2xl shadow-lg border border-gray-200 text-gray-800">
+                
+                {/* 1. SEÇÃO MODELOS FIXOS */}
+                <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 mb-6">
+                    {/* Cabeçalho Mobile */}
+                    <div className="flex flex-col gap-3 mb-3">
+                        <h2 className="text-sm font-bold text-blue-800 uppercase">📁 Metas Recorrentes (Modelos)</h2>
+                        <button onClick={lancarMetasFixasNoMes} className="bg-blue-600 text-white w-full py-3 rounded-lg font-bold text-sm shadow hover:bg-blue-700 active:scale-95 transition">
+                            ⬇ LANÇAR TODAS NO MÊS
+                        </button>
+                    </div>
+                    
+                    <form onSubmit={handleSalvarMetaFixa} className="flex flex-col md:flex-row gap-2 mb-3">
+                         <input className={`${inputClass} bg-white`} placeholder="Categoria Fixa (Ex: Mercado)" value={novaMetaFixa.categoria} onChange={e => setNovaMetaFixa({...novaMetaFixa, categoria: e.target.value})} />
+                         <input className={`${inputClass} md:w-32 bg-white`} type="number" placeholder="Limite" value={novaMetaFixa.valor_limite} onChange={e => setNovaMetaFixa({...novaMetaFixa, valor_limite: e.target.value})} />
+                         <button className="bg-blue-600 text-white py-2 px-4 rounded-lg text-sm font-bold">Add</button>
+                    </form>
+
+                    <div className="space-y-1">
+                        {metasFixas.map(mf => (
+                             <div key={mf.id} className="flex justify-between items-center text-xs p-2 bg-white rounded border border-blue-100">
+                                 <span>{mf.categoria}</span>
+                                 <div className="flex gap-3">
+                                     <span className="font-bold">R$ {mf.valor_limite}</span>
+                                     <button onClick={() => handleExcluir(mf.id, 'metas_fixas')} className="text-red-400">🗑️</button>
+                                 </div>
+                             </div>
+                        ))}
+                    </div>
+                </div>
+
+                <hr className="my-6 border-gray-200" />
+
+                {/* 2. SEÇÃO METAS ATIVAS */}
+                <div>
+                    <h2 className="text-lg font-bold mb-3 text-gray-800">🎯 Acompanhamento (Este Mês)</h2>
+                    
+                    <form onSubmit={handleCriarMetaManual} className="flex flex-col md:flex-row gap-2 mb-4 bg-gray-50 p-3 rounded-lg border">
+                        <input type="text" placeholder="Criar Meta Manual (Mês)" className="flex-1 p-2 border rounded bg-white" value={novaMetaManual.categoria} onChange={e => setNovaMetaManual({...novaMetaManual, categoria: e.target.value})} />
+                        <input type="number" placeholder="Limite" className="w-full md:w-32 p-2 border rounded bg-white" value={novaMetaManual.valor_limite} onChange={e => setNovaMetaManual({...novaMetaManual, valor_limite: e.target.value})} />
+                        <button className="bg-gray-800 text-white px-4 py-2 rounded-lg font-bold text-sm">Criar</button>
+                    </form>
+
+                    <div className="space-y-4">
+                        {metas.length === 0 && <p className="text-center text-gray-400 text-sm">Nenhuma meta ativa neste mês.</p>}
+                        
+                        {metas.map(meta => {
+                            const gastoNaCategoria = transacoes.filter(t => { 
+                                    const d = new Date(t.data_transacao);
+                                    return t.tipo === 'despesa' && d.getMonth() === mesRef && limparTexto(t.categoria) === limparTexto(meta.categoria); 
+                                }).reduce((acc, t) => acc + t.valor, 0);
+                            
+                            const porcentagem = Math.min(100, (gastoNaCategoria / meta.valor_limite) * 100);
+                            const estourou = gastoNaCategoria > meta.valor_limite;
+                            const disponivel = meta.valor_limite - gastoNaCategoria;
+
+                            return (
+                                <div key={meta.id} className="p-3 bg-gray-50 rounded-xl border border-gray-200">
+                                    <div className="flex justify-between items-center mb-2">
+                                        <span className="font-bold text-gray-700 capitalize text-sm">{meta.categoria}</span>
+                                        <div className="flex items-center gap-2">
+                                            <span className={`text-xs font-bold ${estourou ? 'text-red-500' : 'text-gray-500'}`}>R$ {gastoNaCategoria.toFixed(0)} / {meta.valor_limite}</span>
+                                            <button onClick={() => handleExcluir(meta.id, 'metas')} className="text-gray-400 hover:text-red-600">🗑️</button>
+                                        </div>
+                                    </div>
+                                    <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden relative mb-1">
+                                        <div className={`h-full transition-all duration-500 ${estourou ? 'bg-red-500' : 'bg-green-500'}`} style={{ width: `${porcentagem}%` }}></div>
+                                    </div>
+                                    <div className="text-right text-xs">
+                                        <span className={disponivel < 0 ? "text-red-500 font-bold" : "text-green-600 font-bold"}>
+                                            {disponivel < 0 ? `Estourou R$ ${Math.abs(disponivel).toFixed(0)}` : `Resta R$ ${disponivel.toFixed(0)}`}
+                                        </span>
+                                    </div>
+                                </div>
+                            )
+                        })}
+                    </div>
+                </div>
+            </div>
+        )}
       </div>
     </div>
   );
 }
 
-// Componentes Visuais Auxiliares (Cards e Gráficos)
+// Card Simples
 function CardResumo({ titulo, valor, cor, bgDark }) {
     let style = bgDark ? 'bg-[#C5A028] text-white border-yellow-600' : `bg-white text-gray-800 border-${cor}-500`;
     return (
-        <div className={`p-4 rounded-xl shadow border-l-4 ${style}`}>
-            <p className="text-xs font-bold uppercase opacity-70">{titulo}</p>
-            <p className="text-lg font-bold">R$ {Number(valor).toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
-        </div>
-    )
-}
-
-function GraficoCard({ titulo, dados, cores, corBorda }) {
-    return (
-        <div className={`bg-white p-4 rounded-xl shadow border-t-4 border-${corBorda}-500 text-gray-800`}>
-             <h3 className="text-sm font-bold mb-2">{titulo}</h3>
-             <div className="h-48 text-xs">
-                {dados.some(d=>d.value>0) ? (
-                <ResponsiveContainer>
-                    <PieChart>
-                        <Pie data={dados} innerRadius={40} outerRadius={60} paddingAngle={5} dataKey="value">
-                            {dados.map((entry, index) => <Cell key={index} fill={cores[index % cores.length]} />)}
-                        </Pie>
-                        <Tooltip formatter={(val) => `R$ ${val}`} />
-                        <Legend />
-                    </PieChart>
-                </ResponsiveContainer>
-                ) : <div className="flex items-center justify-center h-full text-gray-400">Sem dados</div>}
-             </div>
+        <div className={`p-2 md:p-3 rounded-xl shadow border-l-4 ${style}`}>
+            <p className="text-[10px] font-bold uppercase opacity-70">{titulo}</p>
+            <p className="text-sm md:text-lg font-bold">R$ {Number(valor).toLocaleString('pt-BR', {minimumFractionDigits: 0})}</p>
         </div>
     )
 }
