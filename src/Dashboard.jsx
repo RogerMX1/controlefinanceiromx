@@ -2,14 +2,10 @@ import { useState, useEffect } from 'react';
 import { supabase } from './supabase';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 
-// FUNÇÃO AUXILIAR: Normaliza texto (Tira acentos, maiúsculas e espaços)
-// Assim "Alimentação" vira "alimentacao" para comparar certinho
+// FUNÇÃO AUXILIAR: Normaliza texto
 const limparTexto = (texto) => {
   if (!texto) return '';
-  return texto
-    .toLowerCase()
-    .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Tira acentos
-    .trim(); // Tira espaços do começo/fim
+  return texto.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 };
 
 export default function Dashboard({ session }) {
@@ -37,7 +33,6 @@ export default function Dashboard({ session }) {
 
   async function fetchData() {
     setLoading(true);
-    // Traz até 2000 transações para garantir que o cálculo de metas pegue o mês todo
     const { data: tData } = await supabase
         .from('transacoes')
         .select('*')
@@ -138,7 +133,7 @@ export default function Dashboard({ session }) {
     }
   }
 
-  // --- CÁLCULOS ---
+  // --- CÁLCULOS PRINCIPAIS ---
   const dadosDespesas = transacoes.filter(t => t.tipo === 'despesa').reduce((acc, curr) => {
       const found = acc.find(item => item.name === curr.categoria);
       if (found) found.value += curr.valor; else acc.push({ name: curr.categoria, value: curr.valor });
@@ -157,7 +152,6 @@ export default function Dashboard({ session }) {
 
   const totalReceitas = transacoes.filter(t => t.tipo === 'receita').reduce((acc, t) => acc + t.valor, 0);
   const totalInvestido = transacoes.filter(t => t.tipo === 'investimento').reduce((acc, t) => acc + t.valor, 0);
-  
   const gastosDoMes = transacoes.filter(t => {
     const d = new Date(t.data_transacao);
     return t.tipo === 'despesa' && d.getMonth() === mesRef && d.getFullYear() === anoRef;
@@ -171,6 +165,12 @@ export default function Dashboard({ session }) {
     { name: 'Investido', value: totalInvestido }
   ];
 
+  // --- CÁLCULOS DE PREVISÃO (NOVO!) ---
+  const somaFixas = fixas.reduce((acc, f) => acc + f.valor, 0);
+  const somaMetas = metas.reduce((acc, m) => acc + m.valor_limite, 0);
+  const totalComprometido = somaFixas + somaMetas;
+  const saldoProjetado = saldoConta - totalComprometido;
+
   const corBotaoConfirmar = 
     novoLancamento.tipo === 'receita' ? 'bg-green-600 hover:bg-green-700' :
     novoLancamento.tipo === 'investimento' ? 'bg-blue-600 hover:bg-blue-700' :
@@ -182,33 +182,52 @@ export default function Dashboard({ session }) {
     <div className="min-h-screen bg-neutral-900 font-sans pb-24 text-gray-100">
       
       {/* CABEÇALHO DOURADO */}
-      <div style={{ backgroundColor: '#C5A028' }} className="text-white pt-10 pb-16 px-4 md:px-6 rounded-b-[2rem] shadow-xl mb-[-3rem] relative z-10">
+      <div style={{ backgroundColor: '#C5A028' }} className="text-white pt-10 pb-20 px-4 md:px-6 rounded-b-[2rem] shadow-xl mb-[-3rem] relative z-10">
         <div className="flex flex-col md:flex-row justify-between items-center mb-6 max-w-5xl mx-auto">
           <div className="text-center md:text-left">
             <h1 className="text-2xl md:text-3xl font-bold text-white drop-shadow-sm">Olá, Roger</h1>
             <div className="mt-2 flex items-center justify-center md:justify-start gap-2">
               <span className="text-xs font-semibold text-white/80 uppercase tracking-wider">Referência:</span>
-              <input 
-                type="date" 
-                value={dataConsulta}
-                onChange={(e) => setDataConsulta(e.target.value)}
-                className="bg-black/20 border border-white/30 text-white text-sm font-bold rounded-lg px-3 py-1 outline-none focus:bg-black/30 cursor-pointer"
-              />
+              <input type="date" value={dataConsulta} onChange={(e) => setDataConsulta(e.target.value)} className="bg-black/20 border border-white/30 text-white text-sm font-bold rounded-lg px-3 py-1 outline-none focus:bg-black/30 cursor-pointer" />
             </div>
           </div>
           <button onClick={() => window.location.reload()} className="mt-4 md:mt-0 bg-white/10 hover:bg-white/20 p-2 rounded-lg transition border border-white/20">🔄</button>
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 max-w-5xl mx-auto">
-          <CardResumo titulo="Saldo" valor={saldoConta} cor="green" />
-          <CardResumo titulo="Investido" valor={totalInvestido} cor="blue" />
-          <CardResumo titulo="Total" valor={saldoConta + totalInvestido} cor="gold" bgDark />
+          <CardResumo titulo="Saldo Atual" valor={saldoConta} cor="green" />
+          <CardResumo titulo="Total Investido" valor={totalInvestido} cor="blue" />
+          <CardResumo titulo="Patrimônio" valor={saldoConta + totalInvestido} cor="gold" bgDark />
           <CardResumo titulo="Gasto Mês" valor={gastosDoMes} cor="red" />
         </div>
       </div>
 
       <div className="px-3 md:px-4 max-w-5xl mx-auto space-y-6 pt-16">
         
+        {/* --- NOVA SEÇÃO: PREVISÃO DE GASTOS --- */}
+        <div className="bg-neutral-800 p-4 rounded-2xl shadow-lg border border-neutral-700">
+            <h3 className="text-sm font-bold text-gray-400 mb-3 flex items-center gap-2">🔮 Previsão de Caixa (Mensal)</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-center">
+                <div className="bg-neutral-900/50 p-3 rounded-xl border border-neutral-700">
+                    <p className="text-xs text-gray-500">Soma Fixas + Metas</p>
+                    <p className="text-lg font-bold text-red-400">-{totalComprometido.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</p>
+                </div>
+                <div className="bg-neutral-900/50 p-3 rounded-xl border border-neutral-700">
+                    <p className="text-xs text-gray-500">Saldo Atual</p>
+                    <p className="text-lg font-bold text-white">{saldoConta.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</p>
+                </div>
+                <div className={`p-3 rounded-xl border ${saldoProjetado >= 0 ? 'bg-green-900/20 border-green-800' : 'bg-red-900/20 border-red-800'}`}>
+                    <p className="text-xs font-bold text-gray-400">Saldo Projetado</p>
+                    <p className={`text-xl font-bold ${saldoProjetado >= 0 ? 'text-green-400' : 'text-red-500'}`}>
+                        {saldoProjetado.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}
+                    </p>
+                </div>
+            </div>
+            <p className="text-[10px] text-center text-gray-500 mt-2">
+                *O Saldo Projetado considera se você pagar todas as contas fixas e atingir o limite de todas as metas hoje.
+            </p>
+        </div>
+
         {/* NAVEGAÇÃO DE ABAS */}
         <div className="flex justify-between gap-1 bg-neutral-800 p-1.5 rounded-xl max-w-lg mx-auto overflow-hidden">
           <button onClick={() => setAbaAtiva('lancamentos')} className={`flex-1 py-2.5 rounded-lg text-xs md:text-sm font-bold transition ${abaAtiva === 'lancamentos' ? 'bg-[#C5A028] text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>Diário</button>
@@ -216,7 +235,8 @@ export default function Dashboard({ session }) {
           <button onClick={() => setAbaAtiva('metas')} className={`flex-1 py-2.5 rounded-lg text-xs md:text-sm font-bold transition ${abaAtiva === 'metas' ? 'bg-[#C5A028] text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>Metas</button>
         </div>
 
-        {/* --- ABA 1: MOVIMENTAÇÃO --- */}
+        {/* ... CONTEÚDO DAS ABAS (MANTIDO IGUAL AO ANTERIOR) ... */}
+        {/* ABA 1: MOVIMENTAÇÃO */}
         {abaAtiva === 'lancamentos' && (
           <>
             <div className={`bg-white p-4 md:p-6 rounded-2xl shadow-lg border-t-4 text-gray-800 ${novoLancamento.tipo === 'receita' ? 'border-green-500' : novoLancamento.tipo === 'investimento' ? 'border-blue-500' : 'border-red-500'}`}>
@@ -227,36 +247,26 @@ export default function Dashboard({ session }) {
                   <button type="button" onClick={() => setNovoLancamento({...novoLancamento, tipo: 'despesa'})} className={`flex-1 py-3 text-xs md:text-sm font-bold rounded-lg transition border-2 ${novoLancamento.tipo === 'despesa' ? 'bg-red-600 text-white border-red-600 shadow-md' : 'bg-red-50 text-red-700 border-red-100'}`}>Despesa</button>
                   <button type="button" onClick={() => setNovoLancamento({...novoLancamento, tipo: 'investimento'})} className={`flex-1 py-3 text-xs md:text-sm font-bold rounded-lg transition border-2 ${novoLancamento.tipo === 'investimento' ? 'bg-blue-600 text-white border-blue-600 shadow-md' : 'bg-blue-50 text-blue-700 border-blue-100'}`}>Invest.</button>
                 </div>
-                
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <input type="text" placeholder="Descrição" className={inputClass} value={novoLancamento.descricao} onChange={e => setNovoLancamento({ ...novoLancamento, descricao: e.target.value })} />
                   <input type="number" placeholder="Valor (R$)" className={`${inputClass} font-bold`} value={novoLancamento.valor} onChange={e => setNovoLancamento({ ...novoLancamento, valor: e.target.value })} />
                   <input type="text" list="sugestoes" placeholder="Categoria" className={inputClass} value={novoLancamento.categoria} onChange={e => setNovoLancamento({ ...novoLancamento, categoria: e.target.value })} />
                   <datalist id="sugestoes"><option value="Alimentação"/><option value="Transporte"/><option value="CDB"/><option value="Ações"/></datalist>
-                  
                   {novoLancamento.tipo === 'investimento' && (
                     <div className="md:col-span-2 bg-blue-50 p-4 rounded-xl border border-blue-200">
-                        <label className="block text-xs font-bold text-blue-800 mb-2 uppercase">Origem do dinheiro:</label>
+                        <label className="block text-xs font-bold text-blue-800 mb-2 uppercase">Origem:</label>
                         <div className="flex flex-col md:flex-row gap-3">
-                            <label className="flex items-center gap-2 cursor-pointer bg-white p-2 rounded border border-blue-100">
-                                <input type="radio" name="origem" checked={novoLancamento.origem !== 'novo'} onChange={() => setNovoLancamento({...novoLancamento, origem: 'saldo'})} />
-                                <span className="text-sm text-gray-700">Saldo da Conta</span>
-                            </label>
-                            <label className="flex items-center gap-2 cursor-pointer bg-white p-2 rounded border border-blue-100">
-                                <input type="radio" name="origem" checked={novoLancamento.origem === 'novo'} onChange={() => setNovoLancamento({...novoLancamento, origem: 'novo'})} />
-                                <span className="text-sm text-gray-700 font-bold">Dinheiro Novo</span>
-                            </label>
+                            <label className="flex items-center gap-2 cursor-pointer bg-white p-2 rounded border border-blue-100"><input type="radio" name="origem" checked={novoLancamento.origem !== 'novo'} onChange={() => setNovoLancamento({...novoLancamento, origem: 'saldo'})} /><span className="text-sm text-gray-700">Saldo da Conta</span></label>
+                            <label className="flex items-center gap-2 cursor-pointer bg-white p-2 rounded border border-blue-100"><input type="radio" name="origem" checked={novoLancamento.origem === 'novo'} onChange={() => setNovoLancamento({...novoLancamento, origem: 'novo'})} /><span className="text-sm text-gray-700 font-bold">Dinheiro Novo</span></label>
                         </div>
                         <input type="number" step="0.01" placeholder="Taxa (% a.m.)" className={`mt-3 ${inputClass} border-blue-200 text-blue-700`} value={novoLancamento.taxa_retorno} onChange={e => setNovoLancamento({ ...novoLancamento, taxa_retorno: e.target.value })} />
                     </div>
                   )}
                 </div>
-
                 <button className={`w-full mt-6 py-4 rounded-xl text-white font-bold text-lg shadow-lg hover:opacity-90 active:scale-95 transition ${corBotaoConfirmar}`}>Confirmar</button>
               </form>
             </div>
 
-            {/* METAS NA HOME (COM CÁLCULO INTELIGENTE DE CATEGORIA) */}
             <div className="bg-white p-4 md:p-6 rounded-2xl shadow-lg border border-gray-200 text-gray-800">
                 <h2 className="text-lg font-bold text-gray-800 mb-4">🎯 Metas ({dataRef.toLocaleString('pt-BR', { month: 'short' })})</h2>
                 <div className="flex flex-col md:flex-row gap-3 mb-4 bg-gray-50 p-3 rounded-xl">
@@ -267,33 +277,18 @@ export default function Dashboard({ session }) {
                 <div className="space-y-3">
                   {metas.length === 0 && <p className="text-center text-gray-400 text-xs">Nenhuma meta.</p>}
                   {metas.map(meta => {
-                     // CORREÇÃO AQUI: Verifica Mês e Ano, e compara categoria ignorando acentos
-                     const gasto = transacoes
-                        .filter(t => {
-                            const dataT = new Date(t.data_transacao);
-                            const mesmoMes = dataT.getMonth() === mesRef && dataT.getFullYear() === anoRef;
-                            const mesmaCategoria = limparTexto(t.categoria) === limparTexto(meta.categoria);
-                            return t.tipo === 'despesa' && mesmoMes && mesmaCategoria;
-                        })
-                        .reduce((acc, t) => acc + t.valor, 0);
-
+                     const gasto = transacoes.filter(t => { const d = new Date(t.data_transacao); return t.tipo === 'despesa' && d.getMonth() === mesRef && d.getFullYear() === anoRef && limparTexto(t.categoria) === limparTexto(meta.categoria); }).reduce((acc, t) => acc + t.valor, 0);
                      const pct = Math.min(100, (gasto / meta.valor_limite) * 100);
                      return (
                        <div key={meta.id} className="relative">
-                         <div className="flex justify-between text-xs mb-1 font-bold text-gray-600">
-                            <span className="capitalize">{meta.categoria}</span>
-                            <div className="flex items-center gap-2">
-                                <span className={pct >= 100 ? "text-red-500" : "text-gray-500"}>R$ {gasto.toFixed(0)} / {meta.valor_limite}</span>
-                                <button onClick={() => handleExcluirMeta(meta.id)} className="text-gray-300 hover:text-red-500 p-1" title="Excluir">🗑️</button>
-                            </div>
-                         </div>
+                         <div className="flex justify-between text-xs mb-1 font-bold text-gray-600"><span className="capitalize">{meta.categoria}</span><div className="flex items-center gap-2"><span className={pct >= 100 ? "text-red-500" : "text-gray-500"}>R$ {gasto.toFixed(0)} / {meta.valor_limite}</span><button onClick={() => handleExcluirMeta(meta.id)} className="text-gray-300 hover:text-red-500 p-1">🗑️</button></div></div>
                          <div className="w-full bg-gray-200 rounded-full h-2"><div className={`h-2 rounded-full transition-all ${pct >= 100 ? 'bg-red-500' : 'bg-green-500'}`} style={{ width: `${pct}%` }}></div></div>
                        </div>
                      )
                   })}
                 </div>
             </div>
-
+            
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <GraficoCard titulo="💎 Patrimônio" dados={dadosPatrimonio} cores={CORES_PATRIMONIO} corBorda="green" />
               <GraficoCard titulo="🍕 Gastos" dados={dadosDespesas} cores={CORES_DESPESAS} corBorda="red" />
@@ -309,20 +304,9 @@ export default function Dashboard({ session }) {
                     const mes = dataT.toLocaleString('pt-BR', { month: 'short' }).toUpperCase();
                     return (
                       <div key={t.id} className="flex items-center gap-3 bg-gray-50 p-3 rounded-xl border-b border-gray-100">
-                        <div className="bg-white border border-gray-200 rounded-lg flex flex-col items-center justify-center w-10 h-10 shadow-sm shrink-0">
-                          <span className="text-sm font-bold text-gray-800 leading-none">{dia}</span>
-                          <span className="text-[9px] font-bold text-gray-400 leading-none mt-0.5">{mes}</span>
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="font-bold text-gray-700 text-sm truncate">{t.descricao}</p>
-                          <p className="text-xs text-gray-400 capitalize truncate">{t.categoria} {t.taxa_retorno > 0 && `• ${t.taxa_retorno}%`}</p>
-                        </div>
-                        <div className="flex flex-col items-end gap-1">
-                          <span className={`font-bold text-sm whitespace-nowrap ${t.tipo === 'receita' ? 'text-green-600' : t.tipo === 'investimento' ? 'text-blue-600' : 'text-red-500'}`}>
-                            {t.tipo === 'receita' ? '+' : '-'} {t.valor.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}
-                          </span>
-                          <button onClick={() => handleExcluirTransacao(t.id)} className="text-gray-300 hover:text-red-500 p-1" title="Apagar">🗑️</button>
-                        </div>
+                        <div className="bg-white border border-gray-200 rounded-lg flex flex-col items-center justify-center w-10 h-10 shadow-sm shrink-0"><span className="text-sm font-bold text-gray-800 leading-none">{dia}</span><span className="text-[9px] font-bold text-gray-400 leading-none mt-0.5">{mes}</span></div>
+                        <div className="flex-1 min-w-0"><p className="font-bold text-gray-700 text-sm truncate">{t.descricao}</p><p className="text-xs text-gray-400 capitalize truncate">{t.categoria} {t.taxa_retorno > 0 && `• ${t.taxa_retorno}%`}</p></div>
+                        <div className="flex flex-col items-end gap-1"><span className={`font-bold text-sm whitespace-nowrap ${t.tipo === 'receita' ? 'text-green-600' : t.tipo === 'investimento' ? 'text-blue-600' : 'text-red-500'}`}>{t.tipo === 'receita' ? '+' : '-'} {t.valor.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</span><button onClick={() => handleExcluirTransacao(t.id)} className="text-gray-300 hover:text-red-500 p-1">🗑️</button></div>
                       </div>
                     )
                   })}
@@ -331,63 +315,35 @@ export default function Dashboard({ session }) {
           </>
         )}
 
-        {/* ... OUTRAS ABAS (FIXAS E METAS) CONTINUAM IGUAIS AO ANTERIOR ... */}
+        {/* ABA 2: FIXAS */}
         {abaAtiva === 'fixas' && (
           <div className="bg-white p-4 md:p-6 rounded-2xl shadow-lg border border-gray-200 text-gray-800">
              <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
-                <div className="text-center md:text-left">
-                    <h2 className="text-xl font-bold text-gray-800">⚙️ Despesas Fixas</h2>
-                    <p className="text-xs text-gray-500">Contas que se repetem todo mês.</p>
-                </div>
+                <div className="text-center md:text-left"><h2 className="text-xl font-bold text-gray-800">⚙️ Despesas Fixas</h2><p className="text-xs text-gray-500">Contas que se repetem todo mês.</p></div>
                 <button onClick={lancarFixasNoMes} className="w-full md:w-auto bg-green-600 text-white px-4 py-3 rounded-xl font-bold shadow-md active:scale-95 transition">✅ Lançar no Mês</button>
              </div>
-             
              <form onSubmit={handleSalvarFixa} className="flex flex-col md:flex-row gap-3 mb-6 bg-gray-50 p-3 rounded-xl border">
                 <input type="text" placeholder="Ex: Aluguel" className="w-full md:flex-1 p-3 bg-white border rounded-lg text-base" value={novaFixa.descricao} onChange={e => setNovaFixa({...novaFixa, descricao: e.target.value})} />
                 <input type="number" placeholder="Valor R$" className="w-full md:w-32 p-3 bg-white border rounded-lg text-base" value={novaFixa.valor} onChange={e => setNovaFixa({...novaFixa, valor: e.target.value})} />
                 <button className="w-full md:w-auto bg-blue-600 text-white py-3 px-6 rounded-lg font-bold shadow active:scale-95">Salvar</button>
              </form>
-             
              <div className="space-y-2">
-               {fixas.map(f => (
-                 <div key={f.id} className="flex justify-between items-center p-4 bg-gray-50 rounded-xl border-l-4 border-gray-400 shadow-sm">
-                    <div>
-                        <span className="block font-bold text-gray-700">{f.descricao}</span>
-                        <span className="text-sm font-bold text-gray-900">R$ {f.valor.toFixed(2)}</span>
-                    </div>
-                    <button onClick={() => handleExcluirFixa(f.id)} className="text-red-500 p-2 text-xl active:scale-90 transition" title="Parar de cobrar">🗑️</button>
-                 </div>
-               ))}
+               {fixas.map(f => (<div key={f.id} className="flex justify-between items-center p-4 bg-gray-50 rounded-xl border-l-4 border-gray-400 shadow-sm"><div><span className="block font-bold text-gray-700">{f.descricao}</span><span className="text-sm font-bold text-gray-900">R$ {f.valor.toFixed(2)}</span></div><button onClick={() => handleExcluirFixa(f.id)} className="text-red-500 p-2 text-xl active:scale-90 transition">🗑️</button></div>))}
              </div>
           </div>
         )}
 
+        {/* ABA 3: METAS */}
         {abaAtiva === 'metas' && (
           <div className="bg-white p-4 md:p-6 rounded-2xl shadow-lg border border-gray-200 text-gray-800">
-             <div className="mb-6">
-                <h2 className="text-xl font-bold text-gray-800">🎯 Gestão de Metas Fixas</h2>
-                <p className="text-sm text-gray-500">Cadastre suas metas mensais aqui.</p>
-             </div>
-             
+             <div className="mb-6"><h2 className="text-xl font-bold text-gray-800">🎯 Gestão de Metas Fixas</h2><p className="text-sm text-gray-500">Cadastre suas metas mensais aqui.</p></div>
              <form onSubmit={handleCriarMeta} className="flex flex-col md:flex-row gap-3 mb-6 bg-gray-50 p-3 rounded-xl border">
                 <input type="text" placeholder="Categoria" className="w-full md:flex-1 p-3 bg-white border rounded-lg text-base" value={novaMeta.categoria} onChange={e => setNovaMeta({...novaMeta, categoria: e.target.value})} />
                 <input type="number" placeholder="Limite" className="w-full md:w-32 p-3 bg-white border rounded-lg text-base" value={novaMeta.valor_limite} onChange={e => setNovaMeta({...novaMeta, valor_limite: e.target.value})} />
                 <button className="w-full md:w-auto bg-blue-600 text-white py-3 px-6 rounded-lg font-bold shadow active:scale-95">Criar</button>
              </form>
-
              <div className="space-y-2">
-               {metas.map(m => (
-                 <div key={m.id} className="flex justify-between items-center p-4 bg-gray-50 rounded-xl border-l-4 border-blue-400 shadow-sm">
-                    <div>
-                      <span className="font-bold block text-gray-800 capitalize">{m.categoria}</span>
-                      <span className="text-xs text-gray-500">Limite Mensal</span>
-                    </div>
-                    <div className="flex items-center gap-4">
-                      <span className="font-bold text-blue-600 text-lg">R$ {m.valor_limite}</span>
-                      <button onClick={() => handleExcluirMeta(m.id)} className="text-red-500 p-2 text-xl active:scale-90 transition" title="Excluir">🗑️</button>
-                    </div>
-                 </div>
-               ))}
+               {metas.map(m => (<div key={m.id} className="flex justify-between items-center p-4 bg-gray-50 rounded-xl border-l-4 border-blue-400 shadow-sm"><div><span className="font-bold block text-gray-800 capitalize">{m.categoria}</span><span className="text-xs text-gray-500">Limite Mensal</span></div><div className="flex items-center gap-4"><span className="font-bold text-blue-600 text-lg">R$ {m.valor_limite}</span><button onClick={() => handleExcluirMeta(m.id)} className="text-red-500 p-2 text-xl active:scale-90 transition">🗑️</button></div></div>))}
              </div>
           </div>
         )}
@@ -401,41 +357,24 @@ function CardResumo({ titulo, valor, cor, bgDark }) {
   let bg = 'bg-white';
   let txt = 'text-gray-800';
   if (bgDark) { bg = 'bg-[#C5A028]'; txt = 'text-white'; corBorda = 'border-yellow-600'; }
-  else {
-    if (cor === 'green') corBorda = 'border-green-500';
-    if (cor === 'red') corBorda = 'border-red-500';
-    if (cor === 'blue') corBorda = 'border-blue-500';
-  }
+  else { if (cor === 'green') corBorda = 'border-green-500'; if (cor === 'red') corBorda = 'border-red-500'; if (cor === 'blue') corBorda = 'border-blue-500'; }
   return (
     <div className={`p-3 md:p-4 rounded-xl shadow-md border-l-4 ${bg} ${corBorda} flex flex-col justify-between`}>
       <p className={`text-[9px] md:text-[10px] font-bold uppercase ${bgDark ? 'text-yellow-100' : 'text-gray-400'}`}>{titulo}</p>
-      <p className={`text-sm md:text-lg font-bold mt-1 ${txt}`}>
-        {valor.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}
-      </p>
+      <p className={`text-sm md:text-lg font-bold mt-1 ${txt}`}>{valor.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</p>
     </div>
   );
 }
 
 function GraficoCard({ titulo, dados, cores, corBorda }) {
     let borderClass = 'border-gray-200';
-    if(corBorda === 'green') borderClass = 'border-green-500';
-    if(corBorda === 'red') borderClass = 'border-red-500';
-    if(corBorda === 'blue') borderClass = 'border-blue-500';
-
+    if(corBorda === 'green') borderClass = 'border-green-500'; if(corBorda === 'red') borderClass = 'border-red-500'; if(corBorda === 'blue') borderClass = 'border-blue-500';
     return (
         <div className={`bg-white p-4 rounded-2xl shadow-sm text-gray-800 border-t-4 ${borderClass}`}>
             <h3 className="text-xs font-bold text-gray-700 mb-2">{titulo}</h3>
             <div className="h-40 text-xs">
                 {dados.length > 0 && dados.some(d => d.value > 0) ? (
-                <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                    <Pie data={dados} cx="50%" cy="50%" innerRadius={35} outerRadius={55} paddingAngle={5} dataKey="value">
-                        {dados.map((entry, index) => <Cell key={`cell-${index}`} fill={cores[index % cores.length]} />)}
-                    </Pie>
-                    <Tooltip formatter={(val) => val.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})} />
-                    <Legend verticalAlign="bottom" iconSize={8} wrapperStyle={{fontSize: '10px'}}/>
-                    </PieChart>
-                </ResponsiveContainer>
+                <ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={dados} cx="50%" cy="50%" innerRadius={35} outerRadius={55} paddingAngle={5} dataKey="value">{dados.map((entry, index) => <Cell key={`cell-${index}`} fill={cores[index % cores.length]} />)}</Pie><Tooltip formatter={(val) => val.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})} /><Legend verticalAlign="bottom" iconSize={8} wrapperStyle={{fontSize: '10px'}}/></PieChart></ResponsiveContainer>
                 ) : <div className="h-full flex items-center justify-center text-gray-300">Sem dados</div>}
             </div>
         </div>
