@@ -27,13 +27,11 @@ export default function Dashboard({ session }) {
 
   async function fetchData() {
     setLoading(true);
-    // MELHORIA DE PERFORMANCE: Traz apenas as últimas 100 transações para não travar o celular
     const { data: tData } = await supabase
         .from('transacoes')
         .select('*')
         .order('data_transacao', { ascending: false })
         .limit(100); 
-        
     if (tData) setTransacoes(tData);
     
     const { data: mData } = await supabase.from('metas').select('*');
@@ -108,6 +106,8 @@ export default function Dashboard({ session }) {
     fetchData();
   }
 
+  // --- FUNÇÕES DE EXCLUIR ---
+  
   async function handleExcluirMeta(id) {
     if (confirm("Apagar meta?")) {
       await supabase.from('metas').delete().eq('id', id);
@@ -119,6 +119,14 @@ export default function Dashboard({ session }) {
     if (confirm("Apagar movimentação?")) {
       await supabase.from('transacoes').delete().eq('id', id);
       fetchData();
+    }
+  }
+
+  // NOVA: Excluir Despesa Fixa
+  async function handleExcluirFixa(id) {
+    if (confirm("Remover essa conta fixa da lista automática?")) {
+      await supabase.from('despesas_fixas').delete().eq('id', id);
+      fetchFixas();
     }
   }
 
@@ -160,13 +168,12 @@ export default function Dashboard({ session }) {
     novoLancamento.tipo === 'investimento' ? 'bg-blue-600 hover:bg-blue-700' :
     'bg-red-600 hover:bg-red-700';
 
-  // AJUSTE MOBILE: Input grande, mas sem quebrar a tela (text-base em vez de text-lg no mobile)
   const inputClass = "w-full p-4 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:border-blue-500 transition text-base md:text-lg";
 
   return (
     <div className="min-h-screen bg-neutral-900 font-sans pb-24 text-gray-100 selection:bg-yellow-500 selection:text-white">
       
-      {/* CABEÇALHO DOURADO (Compacto no Mobile) */}
+      {/* CABEÇALHO DOURADO */}
       <div style={{ backgroundColor: '#C5A028' }} className="text-white pt-10 pb-16 px-4 md:px-6 rounded-b-[2rem] shadow-xl mb-[-3rem] relative z-10">
         <div className="flex flex-col md:flex-row justify-between items-center mb-6 max-w-5xl mx-auto">
           <div className="text-center md:text-left">
@@ -184,7 +191,6 @@ export default function Dashboard({ session }) {
           <button onClick={() => window.location.reload()} className="mt-4 md:mt-0 bg-white/10 hover:bg-white/20 p-2 rounded-lg transition border border-white/20">🔄</button>
         </div>
 
-        {/* CARDS RESUMO (Grid ajustado: 2 por linha no celular) */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 max-w-5xl mx-auto">
           <CardResumo titulo="Saldo" valor={saldoConta} cor="green" />
           <CardResumo titulo="Investido" valor={totalInvestido} cor="blue" />
@@ -195,28 +201,23 @@ export default function Dashboard({ session }) {
 
       <div className="px-3 md:px-4 max-w-5xl mx-auto space-y-6 pt-16">
         
-        {/* NAVEGAÇÃO DE ABAS (Mobile Friendly) */}
+        {/* NAVEGAÇÃO DE ABAS */}
         <div className="flex justify-between gap-1 bg-neutral-800 p-1.5 rounded-xl max-w-lg mx-auto overflow-hidden">
           <button onClick={() => setAbaAtiva('lancamentos')} className={`flex-1 py-2.5 rounded-lg text-xs md:text-sm font-bold transition ${abaAtiva === 'lancamentos' ? 'bg-[#C5A028] text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>Diário</button>
           <button onClick={() => setAbaAtiva('fixas')} className={`flex-1 py-2.5 rounded-lg text-xs md:text-sm font-bold transition ${abaAtiva === 'fixas' ? 'bg-[#C5A028] text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>Fixas</button>
           <button onClick={() => setAbaAtiva('metas')} className={`flex-1 py-2.5 rounded-lg text-xs md:text-sm font-bold transition ${abaAtiva === 'metas' ? 'bg-[#C5A028] text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>Metas</button>
         </div>
 
-        {/* --- ABA 1: MOVIMENTAÇÃO (Dia a Dia) --- */}
+        {/* --- ABA 1: MOVIMENTAÇÃO --- */}
         {abaAtiva === 'lancamentos' && (
           <>
             <div className={`bg-white p-4 md:p-6 rounded-2xl shadow-lg border-t-4 text-gray-800 ${novoLancamento.tipo === 'receita' ? 'border-green-500' : novoLancamento.tipo === 'investimento' ? 'border-blue-500' : 'border-red-500'}`}>
-              <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
-                 🚀 Novo Lançamento
-              </h2>
+              <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">🚀 Novo Lançamento</h2>
               <form onSubmit={handleSalvar}>
                 <div className="flex gap-2 mb-4">
-                  <button type="button" onClick={() => setNovoLancamento({...novoLancamento, tipo: 'receita'})} 
-                    className={`flex-1 py-3 text-xs md:text-sm font-bold rounded-lg transition border-2 ${novoLancamento.tipo === 'receita' ? 'bg-green-600 text-white border-green-600 shadow-md' : 'bg-green-50 text-green-700 border-green-100'}`}>Receita</button>
-                  <button type="button" onClick={() => setNovoLancamento({...novoLancamento, tipo: 'despesa'})} 
-                    className={`flex-1 py-3 text-xs md:text-sm font-bold rounded-lg transition border-2 ${novoLancamento.tipo === 'despesa' ? 'bg-red-600 text-white border-red-600 shadow-md' : 'bg-red-50 text-red-700 border-red-100'}`}>Despesa</button>
-                  <button type="button" onClick={() => setNovoLancamento({...novoLancamento, tipo: 'investimento'})} 
-                    className={`flex-1 py-3 text-xs md:text-sm font-bold rounded-lg transition border-2 ${novoLancamento.tipo === 'investimento' ? 'bg-blue-600 text-white border-blue-600 shadow-md' : 'bg-blue-50 text-blue-700 border-blue-100'}`}>Invest.</button>
+                  <button type="button" onClick={() => setNovoLancamento({...novoLancamento, tipo: 'receita'})} className={`flex-1 py-3 text-xs md:text-sm font-bold rounded-lg transition border-2 ${novoLancamento.tipo === 'receita' ? 'bg-green-600 text-white border-green-600 shadow-md' : 'bg-green-50 text-green-700 border-green-100'}`}>Receita</button>
+                  <button type="button" onClick={() => setNovoLancamento({...novoLancamento, tipo: 'despesa'})} className={`flex-1 py-3 text-xs md:text-sm font-bold rounded-lg transition border-2 ${novoLancamento.tipo === 'despesa' ? 'bg-red-600 text-white border-red-600 shadow-md' : 'bg-red-50 text-red-700 border-red-100'}`}>Despesa</button>
+                  <button type="button" onClick={() => setNovoLancamento({...novoLancamento, tipo: 'investimento'})} className={`flex-1 py-3 text-xs md:text-sm font-bold rounded-lg transition border-2 ${novoLancamento.tipo === 'investimento' ? 'bg-blue-600 text-white border-blue-600 shadow-md' : 'bg-blue-50 text-blue-700 border-blue-100'}`}>Invest.</button>
                 </div>
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -243,19 +244,17 @@ export default function Dashboard({ session }) {
                   )}
                 </div>
 
-                <button className={`w-full mt-6 py-4 rounded-xl text-white font-bold text-lg shadow-lg hover:opacity-90 active:scale-95 transition ${corBotaoConfirmar}`}>
-                  Confirmar
-                </button>
+                <button className={`w-full mt-6 py-4 rounded-xl text-white font-bold text-lg shadow-lg hover:opacity-90 active:scale-95 transition ${corBotaoConfirmar}`}>Confirmar</button>
               </form>
             </div>
 
             {/* METAS NA HOME */}
             <div className="bg-white p-4 md:p-6 rounded-2xl shadow-lg border border-gray-200 text-gray-800">
                 <h2 className="text-lg font-bold text-gray-800 mb-4">🎯 Metas ({dataRef.toLocaleString('pt-BR', { month: 'short' })})</h2>
-                <div className="flex gap-2 mb-4 bg-gray-50 p-2 rounded-xl">
-                  <input type="text" placeholder="Meta" className="flex-1 p-2 bg-white border rounded-lg text-sm" value={novaMeta.categoria} onChange={e => setNovaMeta({...novaMeta, categoria: e.target.value})} />
-                  <input type="number" placeholder="Limite" className="w-20 p-2 bg-white border rounded-lg text-sm" value={novaMeta.valor_limite} onChange={e => setNovaMeta({...novaMeta, valor_limite: e.target.value})} />
-                  <button onClick={handleCriarMeta} className="bg-[#C5A028] text-white px-3 rounded-lg font-bold shadow">+</button>
+                <div className="flex flex-col md:flex-row gap-3 mb-4 bg-gray-50 p-3 rounded-xl">
+                  <input type="text" placeholder="Nome da Meta" className="w-full md:flex-1 p-3 bg-white border rounded-lg text-base" value={novaMeta.categoria} onChange={e => setNovaMeta({...novaMeta, categoria: e.target.value})} />
+                  <input type="number" placeholder="Limite R$" className="w-full md:w-32 p-3 bg-white border rounded-lg text-base" value={novaMeta.valor_limite} onChange={e => setNovaMeta({...novaMeta, valor_limite: e.target.value})} />
+                  <button onClick={handleCriarMeta} className="w-full md:w-auto bg-[#C5A028] text-white py-3 px-6 rounded-lg font-bold shadow active:scale-95">Criar</button>
                 </div>
                 <div className="space-y-3">
                   {metas.length === 0 && <p className="text-center text-gray-400 text-xs">Nenhuma meta.</p>}
@@ -268,7 +267,7 @@ export default function Dashboard({ session }) {
                             <span className="capitalize">{meta.categoria}</span>
                             <div className="flex items-center gap-2">
                                 <span className={pct >= 100 ? "text-red-500" : "text-gray-500"}>R$ {gasto} / {meta.valor_limite}</span>
-                                <button onClick={() => handleExcluirMeta(meta.id)} className="text-gray-300 hover:text-red-500" title="Excluir">🗑️</button>
+                                <button onClick={() => handleExcluirMeta(meta.id)} className="text-gray-300 hover:text-red-500 p-1" title="Excluir">🗑️</button>
                             </div>
                          </div>
                          <div className="w-full bg-gray-200 rounded-full h-2"><div className={`h-2 rounded-full transition-all ${pct >= 100 ? 'bg-red-500' : 'bg-green-500'}`} style={{ width: `${pct}%` }}></div></div>
@@ -278,17 +277,15 @@ export default function Dashboard({ session }) {
                 </div>
             </div>
 
-            {/* GRÁFICOS (Grid Responsivo) */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <GraficoCard titulo="💎 Patrimônio" dados={dadosPatrimonio} cores={CORES_PATRIMONIO} corBorda="green" />
               <GraficoCard titulo="🍕 Gastos" dados={dadosDespesas} cores={CORES_DESPESAS} corBorda="red" />
               <GraficoCard titulo="💰 Investimentos" dados={dadosInvestimentos} cores={CORES_INVEST} corBorda="blue" />
             </div>
 
-            {/* EXTRATO */}
             <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-800 text-gray-800">
                 <h2 className="text-lg font-bold text-gray-800 mb-4">📝 Histórico</h2>
-                <div className="space-y-3 max-h-[50vh] overflow-y-auto pr-1 scrollbar-hide">
+                <div className="space-y-3 max-h-[50vh] overflow-y-auto pr-1">
                   {transacoes.map(t => {
                     const dataT = new Date(t.data_transacao);
                     const dia = dataT.getDate().toString().padStart(2, '0');
@@ -319,21 +316,30 @@ export default function Dashboard({ session }) {
 
         {/* --- ABA 2: FIXAS --- */}
         {abaAtiva === 'fixas' && (
-          <div className="bg-white p-6 rounded-2xl shadow-lg border border-gray-200 text-gray-800">
+          <div className="bg-white p-4 md:p-6 rounded-2xl shadow-lg border border-gray-200 text-gray-800">
              <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
-                <h2 className="text-xl font-bold text-gray-800">⚙️ Despesas Fixas</h2>
+                <div className="text-center md:text-left">
+                    <h2 className="text-xl font-bold text-gray-800">⚙️ Despesas Fixas</h2>
+                    <p className="text-xs text-gray-500">Contas que se repetem todo mês.</p>
+                </div>
                 <button onClick={lancarFixasNoMes} className="w-full md:w-auto bg-green-600 text-white px-4 py-3 rounded-xl font-bold shadow-md active:scale-95 transition">✅ Lançar no Mês</button>
              </div>
-             <form onSubmit={handleSalvarFixa} className="flex flex-col md:flex-row gap-2 mb-6 bg-gray-50 p-3 rounded-xl border">
-                <input type="text" placeholder="Ex: Aluguel" className="p-3 bg-white border rounded-lg" value={novaFixa.descricao} onChange={e => setNovaFixa({...novaFixa, descricao: e.target.value})} />
-                <input type="number" placeholder="Valor R$" className="p-3 bg-white border rounded-lg" value={novaFixa.valor} onChange={e => setNovaFixa({...novaFixa, valor: e.target.value})} />
-                <button className="bg-blue-600 text-white py-3 px-6 rounded-lg font-bold shadow">Salvar</button>
+             
+             <form onSubmit={handleSalvarFixa} className="flex flex-col md:flex-row gap-3 mb-6 bg-gray-50 p-3 rounded-xl border">
+                <input type="text" placeholder="Ex: Aluguel" className="w-full md:flex-1 p-3 bg-white border rounded-lg text-base" value={novaFixa.descricao} onChange={e => setNovaFixa({...novaFixa, descricao: e.target.value})} />
+                <input type="number" placeholder="Valor R$" className="w-full md:w-32 p-3 bg-white border rounded-lg text-base" value={novaFixa.valor} onChange={e => setNovaFixa({...novaFixa, valor: e.target.value})} />
+                <button className="w-full md:w-auto bg-blue-600 text-white py-3 px-6 rounded-lg font-bold shadow active:scale-95">Salvar</button>
              </form>
+             
              <div className="space-y-2">
                {fixas.map(f => (
-                 <div key={f.id} className="flex justify-between p-4 bg-gray-50 rounded-xl border-l-4 border-gray-400 shadow-sm">
-                    <span className="font-bold text-gray-700">{f.descricao}</span>
-                    <span className="font-bold text-gray-900">R$ {f.valor.toFixed(2)}</span>
+                 <div key={f.id} className="flex justify-between items-center p-4 bg-gray-50 rounded-xl border-l-4 border-gray-400 shadow-sm">
+                    <div>
+                        <span className="block font-bold text-gray-700">{f.descricao}</span>
+                        <span className="text-sm font-bold text-gray-900">R$ {f.valor.toFixed(2)}</span>
+                    </div>
+                    {/* BOTÃO DE EXCLUIR FIXA */}
+                    <button onClick={() => handleExcluirFixa(f.id)} className="text-red-500 p-2 text-xl active:scale-90 transition" title="Parar de cobrar">🗑️</button>
                  </div>
                ))}
              </div>
@@ -342,16 +348,18 @@ export default function Dashboard({ session }) {
 
         {/* --- ABA 3: METAS --- */}
         {abaAtiva === 'metas' && (
-          <div className="bg-white p-6 rounded-2xl shadow-lg border border-gray-200 text-gray-800">
+          <div className="bg-white p-4 md:p-6 rounded-2xl shadow-lg border border-gray-200 text-gray-800">
              <div className="mb-6">
                 <h2 className="text-xl font-bold text-gray-800">🎯 Gestão de Metas Fixas</h2>
-                <p className="text-sm text-gray-500">Metas recorrentes.</p>
+                <p className="text-sm text-gray-500">Cadastre suas metas mensais aqui.</p>
              </div>
-             <form onSubmit={handleCriarMeta} className="flex gap-2 mb-6 bg-gray-50 p-3 rounded-xl border">
-                <input type="text" placeholder="Categoria" className="flex-1 p-3 bg-white border rounded-lg" value={novaMeta.categoria} onChange={e => setNovaMeta({...novaMeta, categoria: e.target.value})} />
-                <input type="number" placeholder="Limite" className="w-24 p-3 bg-white border rounded-lg" value={novaMeta.valor_limite} onChange={e => setNovaMeta({...novaMeta, valor_limite: e.target.value})} />
-                <button className="bg-blue-600 text-white px-4 rounded-lg font-bold">OK</button>
+             
+             <form onSubmit={handleCriarMeta} className="flex flex-col md:flex-row gap-3 mb-6 bg-gray-50 p-3 rounded-xl border">
+                <input type="text" placeholder="Categoria" className="w-full md:flex-1 p-3 bg-white border rounded-lg text-base" value={novaMeta.categoria} onChange={e => setNovaMeta({...novaMeta, categoria: e.target.value})} />
+                <input type="number" placeholder="Limite" className="w-full md:w-32 p-3 bg-white border rounded-lg text-base" value={novaMeta.valor_limite} onChange={e => setNovaMeta({...novaMeta, valor_limite: e.target.value})} />
+                <button className="w-full md:w-auto bg-blue-600 text-white py-3 px-6 rounded-lg font-bold shadow active:scale-95">Criar</button>
              </form>
+
              <div className="space-y-2">
                {metas.map(m => (
                  <div key={m.id} className="flex justify-between items-center p-4 bg-gray-50 rounded-xl border-l-4 border-blue-400 shadow-sm">
@@ -361,7 +369,8 @@ export default function Dashboard({ session }) {
                     </div>
                     <div className="flex items-center gap-4">
                       <span className="font-bold text-blue-600 text-lg">R$ {m.valor_limite}</span>
-                      <button onClick={() => handleExcluirMeta(m.id)} className="text-red-500 p-2 text-xl" title="Excluir">🗑️</button>
+                      {/* BOTÃO DE EXCLUIR META FIXA */}
+                      <button onClick={() => handleExcluirMeta(m.id)} className="text-red-500 p-2 text-xl active:scale-90 transition" title="Excluir">🗑️</button>
                     </div>
                  </div>
                ))}
@@ -373,7 +382,6 @@ export default function Dashboard({ session }) {
   );
 }
 
-// COMPONENTES AUXILIARES PARA LIMPAR O CÓDIGO
 function CardResumo({ titulo, valor, cor, bgDark }) {
   let corBorda = 'border-gray-200';
   let bg = 'bg-white';
