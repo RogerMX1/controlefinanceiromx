@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from './supabase';
-import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 
 export default function Dashboard({ session }) {
   const user = session.user;
@@ -20,7 +20,7 @@ export default function Dashboard({ session }) {
   // Estados
   const [abaAtiva, setAbaAtiva] = useState('lancamentos'); 
   const [novoLancamento, setNovoLancamento] = useState({ 
-    descricao: '', valor: '', tipo: 'despesa', categoria: '', taxa_retorno: '' 
+    descricao: '', valor: '', tipo: 'despesa', categoria: '', taxa_retorno: '', origem: 'saldo' // 'saldo' ou 'novo'
   });
   const [novaFixa, setNovaFixa] = useState({ descricao: '', valor: '', categoria: '' });
   const [novaMeta, setNovaMeta] = useState({ categoria: '', valor_limite: '' });
@@ -45,17 +45,33 @@ export default function Dashboard({ session }) {
     e.preventDefault();
     if (!novoLancamento.descricao || !novoLancamento.valor) return alert("Preencha tudo!");
     
+    const valorFloat = parseFloat(novoLancamento.valor);
+
+    // LÓGICA DO DINHEIRO NOVO (INVESTIMENTO)
+    // Se for investimento vindo de fora, cria uma RECEITA antes para o saldo não ficar negativo.
+    if (novoLancamento.tipo === 'investimento' && novoLancamento.origem === 'novo') {
+        await supabase.from('transacoes').insert({
+          user_id: user.id,
+          descricao: `Aporte: ${novoLancamento.descricao}`,
+          valor: valorFloat,
+          tipo: 'receita',
+          categoria: 'Aporte Externo',
+          data_transacao: new Date().toISOString()
+        });
+    }
+
+    // Salva a transação principal
     await supabase.from('transacoes').insert({
       user_id: user.id,
       descricao: novoLancamento.descricao,
-      valor: parseFloat(novoLancamento.valor),
+      valor: valorFloat,
       tipo: novoLancamento.tipo,
       categoria: novoLancamento.categoria || 'Geral', 
       taxa_retorno: novoLancamento.tipo === 'investimento' ? parseFloat(novoLancamento.taxa_retorno || 0) : 0,
       data_transacao: new Date().toISOString()
     });
     
-    setNovoLancamento({ ...novoLancamento, descricao: '', valor: '', taxa_retorno: '', categoria: '' });
+    setNovoLancamento({ ...novoLancamento, descricao: '', valor: '', taxa_retorno: '', categoria: '', origem: 'saldo' });
     fetchData();
   }
 
@@ -88,13 +104,19 @@ export default function Dashboard({ session }) {
     });
     setNovaMeta({ categoria: '', valor_limite: '' });
     fetchData();
-    // Não exibe alerta na tela principal para ser mais fluido, só atualiza
     if (abaAtiva === 'metas') alert("Meta Criada!"); 
   }
 
   async function handleExcluirMeta(id) {
     if (confirm("Tem certeza que deseja EXCLUIR essa meta?")) {
       await supabase.from('metas').delete().eq('id', id);
+      fetchData();
+    }
+  }
+
+  async function handleExcluirTransacao(id) {
+    if (confirm("Apagar essa movimentação? O saldo será recalculado.")) {
+      await supabase.from('transacoes').delete().eq('id', id);
       fetchData();
     }
   }
@@ -114,6 +136,7 @@ export default function Dashboard({ session }) {
 
   const CORES_DESPESAS = ['#EF4444', '#F59E0B', '#10B981', '#3B82F6', '#8B5CF6', '#EC4899']; 
   const CORES_INVEST = ['#3B82F6', '#6366F1', '#8B5CF6', '#A855F7'];
+  const CORES_PATRIMONIO = ['#10B981', '#3B82F6']; 
 
   const totalReceitas = transacoes.filter(t => t.tipo === 'receita').reduce((acc, t) => acc + t.valor, 0);
   const totalInvestido = transacoes.filter(t => t.tipo === 'investimento').reduce((acc, t) => acc + t.valor, 0);
@@ -125,6 +148,11 @@ export default function Dashboard({ session }) {
 
   const totalDespesasGeral = transacoes.filter(t => t.tipo === 'despesa').reduce((acc, t) => acc + t.valor, 0);
   const saldoConta = totalReceitas - totalDespesasGeral - totalInvestido;
+
+  const dadosPatrimonio = [
+    { name: 'Em Conta', value: saldoConta > 0 ? saldoConta : 0 },
+    { name: 'Investido', value: totalInvestido }
+  ];
 
   const corBotaoConfirmar = 
     novoLancamento.tipo === 'receita' ? 'bg-green-600 hover:bg-green-700' :
@@ -191,8 +219,29 @@ export default function Dashboard({ session }) {
                   <input type="number" placeholder="Valor (R$)" className={`${inputClass} font-bold`} value={novoLancamento.valor} onChange={e => setNovoLancamento({ ...novoLancamento, valor: e.target.value })} />
                   <input type="text" list="sugestoes" placeholder="Categoria" className={inputClass} value={novoLancamento.categoria} onChange={e => setNovoLancamento({ ...novoLancamento, categoria: e.target.value })} />
                   <datalist id="sugestoes"><option value="Alimentação"/><option value="Transporte"/><option value="CDB"/><option value="Ações"/></datalist>
+                  
+                  {/* SE FOR INVESTIMENTO, PERGUNTA A ORIGEM */}
                   {novoLancamento.tipo === 'investimento' && (
-                    <input type="number" step="0.01" placeholder="Taxa (% a.m.)" className={`${inputClass} border-blue-200 text-blue-700`} value={novoLancamento.taxa_retorno} onChange={e => setNovoLancamento({ ...novoLancamento, taxa_retorno: e.target.value })} />
+                    <div className="md:col-span-2 bg-blue-50 p-4 rounded-xl border border-blue-200">
+                        <label className="block text-sm font-bold text-blue-800 mb-2">Origem do dinheiro:</label>
+                        <div className="flex gap-4">
+                            <label className="flex items-center gap-2 cursor-pointer">
+                                <input type="radio" name="origem" checked={novoLancamento.origem !== 'novo'} onChange={() => setNovoLancamento({...novoLancamento, origem: 'saldo'})} />
+                                <span className="text-gray-700">Saldo da Conta</span>
+                            </label>
+                            <label className="flex items-center gap-2 cursor-pointer">
+                                <input type="radio" name="origem" checked={novoLancamento.origem === 'novo'} onChange={() => setNovoLancamento({...novoLancamento, origem: 'novo'})} />
+                                <span className="text-gray-700 font-bold">Dinheiro Novo / Aporte</span>
+                            </label>
+                        </div>
+                        <p className="text-xs text-blue-600 mt-2">
+                            {novoLancamento.origem === 'novo' 
+                             ? "Será criada uma 'Entrada' automática para não diminuir seu saldo atual." 
+                             : "O valor será descontado do seu saldo em conta."}
+                        </p>
+                        
+                        <input type="number" step="0.01" placeholder="Taxa (% a.m.)" className={`mt-3 ${inputClass} border-blue-200 text-blue-700`} value={novoLancamento.taxa_retorno} onChange={e => setNovoLancamento({ ...novoLancamento, taxa_retorno: e.target.value })} />
+                    </div>
                   )}
                 </div>
 
@@ -202,14 +251,12 @@ export default function Dashboard({ session }) {
               </form>
             </div>
 
-            {/* ACOMPANHAMENTO DE METAS + FORMULÁRIO RÁPIDO RESTAURADO */}
+            {/* METAS NA TELA PRINCIPAL (AGORA COM LIXEIRA) */}
             <div className="bg-white p-6 rounded-2xl shadow-lg border border-gray-200 text-gray-800">
                 <div className="flex justify-between items-center mb-4">
                   <h2 className="text-lg font-bold text-gray-800">🎯 Metas ({dataRef.toLocaleString('pt-BR', { month: 'long' })})</h2>
-                  <span className="text-xs text-gray-400">Mensal</span>
                 </div>
                 
-                {/* FORMULÁRIO RÁPIDO DE META (VOLTOU!) */}
                 <div className="flex gap-2 mb-6 bg-gray-50 p-2 rounded-xl">
                   <input type="text" placeholder="Adicionar Meta (Ex: Ifood)" className="flex-1 p-2 bg-white border rounded-lg text-sm" value={novaMeta.categoria} onChange={e => setNovaMeta({...novaMeta, categoria: e.target.value})} />
                   <input type="number" placeholder="Limite R$" className="w-28 p-2 bg-white border rounded-lg text-sm" value={novaMeta.valor_limite} onChange={e => setNovaMeta({...novaMeta, valor_limite: e.target.value})} />
@@ -225,7 +272,11 @@ export default function Dashboard({ session }) {
                        <div key={meta.id}>
                          <div className="flex justify-between text-sm mb-1 font-bold text-gray-600">
                             <span className="capitalize">{meta.categoria}</span>
-                            <span className={pct >= 100 ? "text-red-500" : "text-gray-500"}>R$ {gasto} / {meta.valor_limite}</span>
+                            <div className="flex items-center gap-2">
+                                <span className={pct >= 100 ? "text-red-500" : "text-gray-500"}>R$ {gasto} / {meta.valor_limite}</span>
+                                {/* BOTÃO DE EXCLUIR (LIXEIRA) */}
+                                <button onClick={() => handleExcluirMeta(meta.id)} className="text-gray-300 hover:text-red-500 text-xs" title="Excluir Meta">🗑️</button>
+                            </div>
                          </div>
                          <div className="w-full bg-gray-200 rounded-full h-2.5"><div className={`h-2.5 rounded-full transition-all ${pct >= 100 ? 'bg-red-500' : 'bg-green-500'}`} style={{ width: `${pct}%` }}></div></div>
                        </div>
@@ -234,29 +285,49 @@ export default function Dashboard({ session }) {
                 </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="bg-white p-6 rounded-2xl shadow-sm text-gray-800">
-                <h3 className="text-lg font-bold text-gray-700 mb-4 border-b pb-2">🍕 Gastos por Categoria</h3>
-                <div className="h-64 text-xs">
+            {/* GRÁFICOS */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              
+              <div className="bg-white p-6 rounded-2xl shadow-sm text-gray-800 border-t-4 border-green-500">
+                <h3 className="text-sm font-bold text-gray-700 mb-4 pb-2">💎 Composição Patrimonial</h3>
+                <div className="h-48 text-xs">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie data={dadosPatrimonio} cx="50%" cy="50%" innerRadius={40} outerRadius={60} paddingAngle={5} dataKey="value">
+                        {dadosPatrimonio.map((entry, index) => <Cell key={`cell-${index}`} fill={CORES_PATRIMONIO[index]} />)}
+                      </Pie>
+                      <Tooltip />
+                      <Legend verticalAlign="bottom" height={36}/>
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              <div className="bg-white p-6 rounded-2xl shadow-sm text-gray-800 border-t-4 border-red-500">
+                <h3 className="text-sm font-bold text-gray-700 mb-4 pb-2">🍕 Gastos por Categoria</h3>
+                <div className="h-48 text-xs">
                   {dadosDespesas.length > 0 ? (
                     <ResponsiveContainer width="100%" height="100%">
-                      <PieChart><Pie data={dadosDespesas} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value">{dadosDespesas.map((entry, index) => <Cell key={`cell-${index}`} fill={CORES_DESPESAS[index % CORES_DESPESAS.length]} />)}</Pie><Tooltip /></PieChart>
+                      <PieChart><Pie data={dadosDespesas} cx="50%" cy="50%" innerRadius={40} outerRadius={60} paddingAngle={5} dataKey="value">{dadosDespesas.map((entry, index) => <Cell key={`cell-${index}`} fill={CORES_DESPESAS[index % CORES_DESPESAS.length]} />)}</Pie><Tooltip /></PieChart>
                     </ResponsiveContainer>
-                  ) : <p className="text-center text-gray-400 mt-20">Sem despesas.</p>}
+                  ) : <p className="text-center text-gray-400 mt-10">Sem despesas.</p>}
                 </div>
               </div>
-              <div className="bg-white p-6 rounded-2xl shadow-sm text-gray-800">
-                <h3 className="text-lg font-bold text-gray-700 mb-4 border-b pb-2">💰 Distribuição de Investimentos</h3>
-                <div className="h-64 text-xs">
+
+              <div className="bg-white p-6 rounded-2xl shadow-sm text-gray-800 border-t-4 border-blue-500">
+                <h3 className="text-sm font-bold text-gray-700 mb-4 pb-2">💰 Detalhe Investimentos</h3>
+                <div className="h-48 text-xs">
                   {dadosInvestimentos.length > 0 ? (
                     <ResponsiveContainer width="100%" height="100%">
-                      <PieChart><Pie data={dadosInvestimentos} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value">{dadosInvestimentos.map((entry, index) => <Cell key={`cell-${index}`} fill={CORES_INVEST[index % CORES_INVEST.length]} />)}</Pie><Tooltip /></PieChart>
+                      <PieChart><Pie data={dadosInvestimentos} cx="50%" cy="50%" innerRadius={40} outerRadius={60} paddingAngle={5} dataKey="value">{dadosInvestimentos.map((entry, index) => <Cell key={`cell-${index}`} fill={CORES_INVEST[index % CORES_INVEST.length]} />)}</Pie><Tooltip /></PieChart>
                     </ResponsiveContainer>
-                  ) : <p className="text-center text-gray-400 mt-20">Sem investimentos.</p>}
+                  ) : <p className="text-center text-gray-400 mt-10">Sem investimentos.</p>}
                 </div>
               </div>
+
             </div>
 
+            {/* EXTRATO */}
             <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-800 text-gray-800">
                 <h2 className="text-lg font-bold text-gray-800 mb-4">📝 Histórico</h2>
                 <div className="space-y-3 max-h-80 overflow-y-auto pr-2">
@@ -265,7 +336,7 @@ export default function Dashboard({ session }) {
                     const dia = dataT.getDate().toString().padStart(2, '0');
                     const mes = dataT.toLocaleString('pt-BR', { month: 'short' }).toUpperCase();
                     return (
-                      <div key={t.id} className="flex items-center gap-3 bg-gray-50 p-3 rounded-lg border-b border-gray-100">
+                      <div key={t.id} className="flex items-center gap-3 bg-gray-50 p-3 rounded-lg border-b border-gray-100 group">
                         <div className="bg-white border border-gray-200 rounded flex flex-col items-center justify-center w-12 h-12 shadow-sm">
                           <span className="text-lg font-bold text-gray-800 leading-none">{dia}</span>
                           <span className="text-[10px] font-bold text-gray-500 leading-none mt-1">{mes}</span>
@@ -274,9 +345,12 @@ export default function Dashboard({ session }) {
                           <p className="font-bold text-gray-700 text-sm">{t.descricao}</p>
                           <p className="text-xs text-gray-400 capitalize">{t.categoria} {t.taxa_retorno > 0 && `• ${t.taxa_retorno}%`}</p>
                         </div>
-                        <span className={`font-bold text-sm ${t.tipo === 'receita' ? 'text-green-600' : t.tipo === 'investimento' ? 'text-blue-600' : 'text-red-500'}`}>
-                          {t.tipo === 'receita' ? '+' : '-'} R$ {t.valor.toFixed(2)}
-                        </span>
+                        <div className="flex flex-col items-end gap-1">
+                          <span className={`font-bold text-sm ${t.tipo === 'receita' ? 'text-green-600' : t.tipo === 'investimento' ? 'text-blue-600' : 'text-red-500'}`}>
+                            {t.tipo === 'receita' ? '+' : '-'} R$ {t.valor.toFixed(2)}
+                          </span>
+                          <button onClick={() => handleExcluirTransacao(t.id)} className="text-gray-300 hover:text-red-500 transition" title="Apagar transação">🗑️</button>
+                        </div>
                       </div>
                     )
                   })}
@@ -308,7 +382,7 @@ export default function Dashboard({ session }) {
           </div>
         )}
 
-        {/* --- ABA 3: METAS FIXAS (COM EXCLUSÃO) --- */}
+        {/* --- ABA 3: METAS FIXAS --- */}
         {abaAtiva === 'metas' && (
           <div className="bg-white p-6 rounded-2xl shadow-lg border border-gray-200 text-gray-800">
              <div className="mb-6">
@@ -316,14 +390,12 @@ export default function Dashboard({ session }) {
                 <p className="text-sm text-gray-500">Cadastre suas metas mensais aqui.</p>
              </div>
              
-             {/* Formulário de Criar Meta */}
              <form onSubmit={handleCriarMeta} className="flex gap-2 mb-6 bg-gray-50 p-3 rounded-xl border">
                 <input type="text" placeholder="Categoria (Ex: Mercado)" className="flex-1 p-3 bg-white border rounded" value={novaMeta.categoria} onChange={e => setNovaMeta({...novaMeta, categoria: e.target.value})} />
                 <input type="number" placeholder="Limite R$" className="w-28 p-3 bg-white border rounded" value={novaMeta.valor_limite} onChange={e => setNovaMeta({...novaMeta, valor_limite: e.target.value})} />
                 <button className="bg-blue-600 text-white px-4 rounded font-bold">Criar</button>
              </form>
 
-             {/* Lista de Metas Ativas com botão de EXCLUIR 🗑️ */}
              <div className="space-y-2">
                {metas.length === 0 && <p className="text-gray-400 text-center">Nenhuma meta definida.</p>}
                {metas.map(m => (
@@ -334,7 +406,6 @@ export default function Dashboard({ session }) {
                     </div>
                     <div className="flex items-center gap-4">
                       <span className="font-bold text-blue-600 text-lg">R$ {m.valor_limite}</span>
-                      {/* BOTÃO DE EXCLUIR AQUI */}
                       <button onClick={() => handleExcluirMeta(m.id)} className="text-red-500 hover:text-red-700 p-2 font-bold text-xl transition-transform hover:scale-110" title="Excluir Meta">🗑️</button>
                     </div>
                  </div>
