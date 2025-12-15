@@ -2,6 +2,16 @@ import { useState, useEffect } from 'react';
 import { supabase } from './supabase';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 
+// FUNÇÃO AUXILIAR: Normaliza texto (Tira acentos, maiúsculas e espaços)
+// Assim "Alimentação" vira "alimentacao" para comparar certinho
+const limparTexto = (texto) => {
+  if (!texto) return '';
+  return texto
+    .toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Tira acentos
+    .trim(); // Tira espaços do começo/fim
+};
+
 export default function Dashboard({ session }) {
   const user = session.user;
   const [loading, setLoading] = useState(true);
@@ -27,11 +37,12 @@ export default function Dashboard({ session }) {
 
   async function fetchData() {
     setLoading(true);
+    // Traz até 2000 transações para garantir que o cálculo de metas pegue o mês todo
     const { data: tData } = await supabase
         .from('transacoes')
         .select('*')
         .order('data_transacao', { ascending: false })
-        .limit(100); 
+        .limit(2000); 
     if (tData) setTransacoes(tData);
     
     const { data: mData } = await supabase.from('metas').select('*');
@@ -106,8 +117,6 @@ export default function Dashboard({ session }) {
     fetchData();
   }
 
-  // --- FUNÇÕES DE EXCLUIR ---
-  
   async function handleExcluirMeta(id) {
     if (confirm("Apagar meta?")) {
       await supabase.from('metas').delete().eq('id', id);
@@ -122,7 +131,6 @@ export default function Dashboard({ session }) {
     }
   }
 
-  // NOVA: Excluir Despesa Fixa
   async function handleExcluirFixa(id) {
     if (confirm("Remover essa conta fixa da lista automática?")) {
       await supabase.from('despesas_fixas').delete().eq('id', id);
@@ -171,7 +179,7 @@ export default function Dashboard({ session }) {
   const inputClass = "w-full p-4 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:border-blue-500 transition text-base md:text-lg";
 
   return (
-    <div className="min-h-screen bg-neutral-900 font-sans pb-24 text-gray-100 selection:bg-yellow-500 selection:text-white">
+    <div className="min-h-screen bg-neutral-900 font-sans pb-24 text-gray-100">
       
       {/* CABEÇALHO DOURADO */}
       <div style={{ backgroundColor: '#C5A028' }} className="text-white pt-10 pb-16 px-4 md:px-6 rounded-b-[2rem] shadow-xl mb-[-3rem] relative z-10">
@@ -248,7 +256,7 @@ export default function Dashboard({ session }) {
               </form>
             </div>
 
-            {/* METAS NA HOME */}
+            {/* METAS NA HOME (COM CÁLCULO INTELIGENTE DE CATEGORIA) */}
             <div className="bg-white p-4 md:p-6 rounded-2xl shadow-lg border border-gray-200 text-gray-800">
                 <h2 className="text-lg font-bold text-gray-800 mb-4">🎯 Metas ({dataRef.toLocaleString('pt-BR', { month: 'short' })})</h2>
                 <div className="flex flex-col md:flex-row gap-3 mb-4 bg-gray-50 p-3 rounded-xl">
@@ -259,14 +267,23 @@ export default function Dashboard({ session }) {
                 <div className="space-y-3">
                   {metas.length === 0 && <p className="text-center text-gray-400 text-xs">Nenhuma meta.</p>}
                   {metas.map(meta => {
-                     const gasto = transacoes.filter(t => t.tipo === 'despesa' && t.categoria?.toLowerCase() === meta.categoria.toLowerCase() && new Date(t.data_transacao).getMonth() === mesRef).reduce((acc, t) => acc + t.valor, 0);
+                     // CORREÇÃO AQUI: Verifica Mês e Ano, e compara categoria ignorando acentos
+                     const gasto = transacoes
+                        .filter(t => {
+                            const dataT = new Date(t.data_transacao);
+                            const mesmoMes = dataT.getMonth() === mesRef && dataT.getFullYear() === anoRef;
+                            const mesmaCategoria = limparTexto(t.categoria) === limparTexto(meta.categoria);
+                            return t.tipo === 'despesa' && mesmoMes && mesmaCategoria;
+                        })
+                        .reduce((acc, t) => acc + t.valor, 0);
+
                      const pct = Math.min(100, (gasto / meta.valor_limite) * 100);
                      return (
                        <div key={meta.id} className="relative">
                          <div className="flex justify-between text-xs mb-1 font-bold text-gray-600">
                             <span className="capitalize">{meta.categoria}</span>
                             <div className="flex items-center gap-2">
-                                <span className={pct >= 100 ? "text-red-500" : "text-gray-500"}>R$ {gasto} / {meta.valor_limite}</span>
+                                <span className={pct >= 100 ? "text-red-500" : "text-gray-500"}>R$ {gasto.toFixed(0)} / {meta.valor_limite}</span>
                                 <button onClick={() => handleExcluirMeta(meta.id)} className="text-gray-300 hover:text-red-500 p-1" title="Excluir">🗑️</button>
                             </div>
                          </div>
@@ -314,7 +331,7 @@ export default function Dashboard({ session }) {
           </>
         )}
 
-        {/* --- ABA 2: FIXAS --- */}
+        {/* ... OUTRAS ABAS (FIXAS E METAS) CONTINUAM IGUAIS AO ANTERIOR ... */}
         {abaAtiva === 'fixas' && (
           <div className="bg-white p-4 md:p-6 rounded-2xl shadow-lg border border-gray-200 text-gray-800">
              <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
@@ -338,7 +355,6 @@ export default function Dashboard({ session }) {
                         <span className="block font-bold text-gray-700">{f.descricao}</span>
                         <span className="text-sm font-bold text-gray-900">R$ {f.valor.toFixed(2)}</span>
                     </div>
-                    {/* BOTÃO DE EXCLUIR FIXA */}
                     <button onClick={() => handleExcluirFixa(f.id)} className="text-red-500 p-2 text-xl active:scale-90 transition" title="Parar de cobrar">🗑️</button>
                  </div>
                ))}
@@ -346,7 +362,6 @@ export default function Dashboard({ session }) {
           </div>
         )}
 
-        {/* --- ABA 3: METAS --- */}
         {abaAtiva === 'metas' && (
           <div className="bg-white p-4 md:p-6 rounded-2xl shadow-lg border border-gray-200 text-gray-800">
              <div className="mb-6">
@@ -369,7 +384,6 @@ export default function Dashboard({ session }) {
                     </div>
                     <div className="flex items-center gap-4">
                       <span className="font-bold text-blue-600 text-lg">R$ {m.valor_limite}</span>
-                      {/* BOTÃO DE EXCLUIR META FIXA */}
                       <button onClick={() => handleExcluirMeta(m.id)} className="text-red-500 p-2 text-xl active:scale-90 transition" title="Excluir">🗑️</button>
                     </div>
                  </div>
