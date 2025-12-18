@@ -21,7 +21,7 @@ export default function Dashboard({ session }) {
   // --- UI ---
   const [abaAtiva, setAbaAtiva] = useState('lancamentos');
   
-  // --- ESTADO DO FORMULÁRIO ---
+  // --- INPUTS ---
   const [tipoLancamento, setTipoLancamento] = useState('despesa'); // 'receita', 'despesa', 'investimento'
   
   // Dados Gerais
@@ -29,12 +29,12 @@ export default function Dashboard({ session }) {
   const [valor, setValor] = useState('');
   const [categoria, setCategoria] = useState('');
   
-  // Específicos de Investimento
-  const [investAcao, setInvestAcao] = useState('aporte'); // 'aporte' ou 'resgate'
-  const [investOrigem, setInvestOrigem] = useState('saldo'); // 'saldo' ou 'novo'
+  // Investimento
+  const [investAcao, setInvestAcao] = useState('aporte'); 
+  const [investOrigem, setInvestOrigem] = useState('saldo'); 
   const [taxaRetorno, setTaxaRetorno] = useState('');
 
-  // Inputs Fixos (Abas)
+  // Inputs Fixos
   const [novaFixa, setNovaFixa] = useState({ descricao: '', valor: '', categoria: '' });
   const [novaReceitaFixa, setNovaReceitaFixa] = useState({ descricao: '', valor: '', categoria: '' });
   const [novaMetaFixa, setNovaMetaFixa] = useState({ categoria: '', valor_limite: '' }); 
@@ -57,15 +57,16 @@ export default function Dashboard({ session }) {
 
   // --- BUSCAS ---
   async function fetchTransacoes() {
-    const { data } = await supabase.from('transacoes').select('*').order('data_transacao', { ascending: false }).limit(2000);
+    const { data, error } = await supabase.from('transacoes').select('*').order('data_transacao', { ascending: false }).limit(2000);
     if (data) setTransacoes(data);
+    if (error) console.error("Erro Transações:", error);
   }
   async function fetchMetas() { const { data } = await supabase.from('metas').select('*'); if (data) setMetas(data); }
   async function fetchFixas() { const { data } = await supabase.from('despesas_fixas').select('*'); if (data) setFixas(data); }
   async function fetchReceitasFixas() { const { data } = await supabase.from('receitas_fixas').select('*'); if (data) setReceitasFixas(data); }
   async function fetchMetasFixas() { const { data } = await supabase.from('metas_fixas').select('*'); if (data) setMetasFixas(data); }
 
-  // --- SALVAR LANÇAMENTO (Lógica Complexa Restaurada) ---
+  // --- SALVAR LANÇAMENTO (DIÁRIO) ---
   async function handleSalvarLancamento(e) {
     e.preventDefault();
     if (!descricao || !valor) return alert("Preencha descrição e valor!");
@@ -75,16 +76,15 @@ export default function Dashboard({ session }) {
     let finalDesc = descricao;
     let finalCategoria = categoria;
 
-    // Lógica Específica de Investimento
+    // Lógica Investimento
     if (tipoLancamento === 'investimento') {
         if (investAcao === 'resgate') {
-            finalTipo = 'resgate'; // Vira uma entrada de volta pra conta
+            finalTipo = 'resgate'; 
             finalDesc = `Resgate: ${descricao}`;
             finalCategoria = 'Resgate Investimento';
         } else {
-            // É Aporte
+            // Aporte
             if (investOrigem === 'novo') {
-                // Se é dinheiro novo, primeiro cria uma RECEITA para entrar o dinheiro, depois investe
                 await supabase.from('transacoes').insert({
                     user_id: user.id,
                     descricao: `Entrada para Aporte: ${descricao}`,
@@ -94,11 +94,9 @@ export default function Dashboard({ session }) {
                     data_transacao: new Date().toISOString()
                 });
             }
-            // O registro do investimento em si
             finalTipo = 'investimento';
         }
     } else {
-        // Receita ou Despesa Normal
         if (!finalCategoria) finalCategoria = 'Geral';
     }
 
@@ -112,37 +110,90 @@ export default function Dashboard({ session }) {
       data_transacao: new Date().toISOString()
     });
 
-    if (error) {
-        alert("Erro ao salvar: " + error.message);
-    } else {
-        // Limpar form
+    if (error) alert("ERRO AO SALVAR TRANSAÇÃO: " + error.message);
+    else {
         setDescricao(''); setValor(''); setCategoria(''); setTaxaRetorno('');
         fetchTransacoes();
     }
   }
 
-  // --- FUNÇÕES DE CADASTRO FIXO ---
+  // --- SALVAR FIXAS (COM DEBUG DE ERRO) ---
   async function handleSalvarFixa(e) {
-      e.preventDefault(); if(!novaFixa.descricao) return;
-      const { error } = await supabase.from('despesas_fixas').insert({ user_id: user.id, descricao: novaFixa.descricao, valor: parseFloat(novaFixa.valor), categoria: novaFixa.categoria || 'Fixa' });
-      if(!error) { setNovaFixa({descricao:'', valor:'', categoria:''}); fetchFixas(); } else alert("Erro ao salvar fixa");
+      e.preventDefault(); 
+      if(!novaFixa.descricao) return alert("Preencha a descrição");
+      
+      const payload = { 
+          user_id: user.id, // Verifica se o ID está indo
+          descricao: novaFixa.descricao, 
+          valor: parseFloat(novaFixa.valor), 
+          categoria: novaFixa.categoria || 'Fixa' 
+      };
+      
+      console.log("Enviando Despesa Fixa:", payload); // OLHE O CONSOLE (F12)
+
+      const { error } = await supabase.from('despesas_fixas').insert(payload);
+      
+      if(error) {
+          console.error(error);
+          alert("ERRO DESPESA FIXA: " + error.message + "\nCódigo: " + error.code);
+      } else { 
+          setNovaFixa({descricao:'', valor:'', categoria:''}); 
+          fetchFixas(); 
+      }
   }
+
   async function handleSalvarReceitaFixa(e) {
-      e.preventDefault(); if(!novaReceitaFixa.descricao) return;
-      const { error } = await supabase.from('receitas_fixas').insert({ user_id: user.id, descricao: novaReceitaFixa.descricao, valor: parseFloat(novaReceitaFixa.valor), categoria: novaReceitaFixa.categoria || 'Salário' });
-      if(!error) { setNovaReceitaFixa({descricao:'', valor:'', categoria:''}); fetchReceitasFixas(); } else alert("Erro ao salvar receita fixa");
+      e.preventDefault(); 
+      if(!novaReceitaFixa.descricao) return alert("Preencha a descrição");
+
+      const payload = { 
+          user_id: user.id, 
+          descricao: novaReceitaFixa.descricao, 
+          valor: parseFloat(novaReceitaFixa.valor), 
+          categoria: novaReceitaFixa.categoria || 'Salário' 
+      };
+
+      console.log("Enviando Receita Fixa:", payload); // OLHE O CONSOLE (F12)
+
+      const { error } = await supabase.from('receitas_fixas').insert(payload);
+      
+      if(error) {
+          console.error(error);
+          alert("ERRO RECEITA FIXA: " + error.message + "\nCódigo: " + error.code);
+      } else { 
+          setNovaReceitaFixa({descricao:'', valor:'', categoria:''}); 
+          fetchReceitasFixas(); 
+      }
   }
+
   async function handleSalvarMetaFixa(e) {
-      e.preventDefault(); if(!novaMetaFixa.categoria) return;
-      const { error } = await supabase.from('metas_fixas').insert({ user_id: user.id, categoria: novaMetaFixa.categoria, valor_limite: parseFloat(novaMetaFixa.valor_limite) });
-      if(!error) { setNovaMetaFixa({ categoria: '', valor_limite: '' }); fetchMetasFixas(); } else alert("Erro ao salvar meta fixa");
+      e.preventDefault(); 
+      if(!novaMetaFixa.categoria) return alert("Preencha a categoria");
+      
+      const payload = { 
+          user_id: user.id, 
+          categoria: novaMetaFixa.categoria, 
+          valor_limite: parseFloat(novaMetaFixa.valor_limite) 
+      };
+
+      console.log("Enviando Meta Fixa:", payload); // OLHE O CONSOLE (F12)
+
+      const { error } = await supabase.from('metas_fixas').insert(payload);
+      
+      if(error) {
+          console.error(error);
+          alert("ERRO META FIXA: " + error.message + "\nCódigo: " + error.code);
+      } else { 
+          setNovaMetaFixa({ categoria: '', valor_limite: '' }); 
+          fetchMetasFixas(); 
+      }
   }
   
-  // --- METAS DO MÊS ---
   async function handleCriarMetaManual(e) {
       e.preventDefault(); if(!novaMetaManual.categoria) return;
-      await supabase.from('metas').insert({ user_id: user.id, categoria: novaMetaManual.categoria, valor_limite: parseFloat(novaMetaManual.valor_limite) });
-      setNovaMetaManual({ categoria: '', valor_limite: '' }); fetchMetas();
+      const { error } = await supabase.from('metas').insert({ user_id: user.id, categoria: novaMetaManual.categoria, valor_limite: parseFloat(novaMetaManual.valor_limite) });
+      if(error) alert("ERRO META MENSAL: " + error.message);
+      else { setNovaMetaManual({ categoria: '', valor_limite: '' }); fetchMetas(); }
   }
 
   // --- LANÇAMENTOS EM MASSA ---
@@ -164,7 +215,7 @@ export default function Dashboard({ session }) {
       }
 
       const { error } = await supabase.from(tabelaDestino).insert(payload);
-      if(error) alert("Erro: " + error.message);
+      if(error) alert("ERRO MASSA: " + error.message);
       else tabelaDestino === 'metas' ? fetchMetas() : fetchTransacoes();
   }
 
@@ -174,30 +225,34 @@ export default function Dashboard({ session }) {
       if (!confirm(`Lançar apenas "${nome}"?`)) return;
 
       if (tabelaDestino === 'metas') {
-          await supabase.from('metas').insert({ user_id: user.id, categoria: item.categoria, valor_limite: item.valor_limite });
-          fetchMetas();
+          const { error } = await supabase.from('metas').insert({ user_id: user.id, categoria: item.categoria, valor_limite: item.valor_limite });
+          if(error) alert("ERRO META INDIVIDUAL: " + error.message); else fetchMetas();
       } else {
-          await supabase.from('transacoes').insert({
+          const { error } = await supabase.from('transacoes').insert({
               user_id: user.id, descricao: item.descricao, valor: item.valor, tipo: tipo, categoria: item.categoria, data_transacao: new Date().toISOString()
           });
-          fetchTransacoes();
+          if(error) alert("ERRO TRANSAÇÃO INDIVIDUAL: " + error.message); else fetchTransacoes();
       }
   }
 
+  // --- EXCLUSÃO ---
   async function handleExcluir(id, table) {
       if(confirm("Excluir item?")) {
-          await supabase.from(table).delete().eq('id', id);
-          if(table === 'transacoes') fetchTransacoes(); if(table === 'metas') fetchMetas(); if(table === 'despesas_fixas') fetchFixas(); if(table === 'receitas_fixas') fetchReceitasFixas(); if(table === 'metas_fixas') fetchMetasFixas();
+          const { error } = await supabase.from(table).delete().eq('id', id);
+          if(error) alert("ERRO AO EXCLUIR: " + error.message);
+          else {
+            if(table === 'transacoes') fetchTransacoes();
+            if(table === 'metas') fetchMetas();
+            if(table === 'despesas_fixas') fetchFixas();
+            if(table === 'receitas_fixas') fetchReceitasFixas();
+            if(table === 'metas_fixas') fetchMetasFixas();
+          }
       }
   }
 
   // --- CÁLCULOS ---
   const receitas = transacoes.filter(t => t.tipo === 'receita').reduce((acc, t) => acc + t.valor, 0);
   const despesas = transacoes.filter(t => t.tipo === 'despesa').reduce((acc, t) => acc + t.valor, 0);
-  
-  // INVESTIMENTOS:
-  // Aporte (investimento): Sai do saldo da conta (se origem=saldo). Soma no total investido.
-  // Resgate (resgate): Entra no saldo da conta. Subtrai do total investido.
   const aportes = transacoes.filter(t => t.tipo === 'investimento').reduce((acc, t) => acc + t.valor, 0);
   const resgates = transacoes.filter(t => t.tipo === 'resgate').reduce((acc, t) => acc + t.valor, 0);
 
@@ -212,6 +267,7 @@ export default function Dashboard({ session }) {
       }).reduce((sum, t) => sum + t.valor, 0);
       return acc + Math.max(0, meta.valor_limite - gastoNaCategoria);
   }, 0);
+
   const previsaoCaixa = saldoConta - somaMetasRestantes;
 
   // Gráficos
@@ -220,7 +276,6 @@ export default function Dashboard({ session }) {
       if (found) found.value += curr.valor; else acc.push({ name: curr.categoria, value: curr.valor }); return acc;
   }, []);
   
-  // Gráfico Investimento
   const dadosInvestimentos = transacoes.filter(t => t.tipo === 'investimento').reduce((acc, curr) => {
       const found = acc.find(item => item.name === curr.categoria);
       if (found) found.value += curr.valor; else acc.push({ name: curr.categoria, value: curr.valor }); return acc;
@@ -285,11 +340,10 @@ export default function Dashboard({ session }) {
         {abaAtiva === 'lancamentos' && (
           <div className="space-y-6">
             
-            {/* FORMULÁRIO INTELIGENTE */}
+            {/* FORMULÁRIO */}
             <div className={`bg-white p-4 rounded-2xl shadow border-t-4 text-gray-800 border-${tipoLancamento === 'receita' ? 'green' : tipoLancamento === 'investimento' ? 'blue' : 'red'}-500`}>
               <h2 className="text-sm md:text-lg font-bold text-gray-800 mb-3">🚀 Novo Lançamento</h2>
               
-              {/* TIPO */}
               <div className="flex gap-2 mb-3 bg-gray-100 p-1 rounded-lg">
                   <button onClick={() => setTipoLancamento('receita')} className={`flex-1 py-2 text-xs font-bold rounded ${tipoLancamento === 'receita' ? 'bg-green-600 text-white shadow' : 'text-gray-500'}`}>Receita</button>
                   <button onClick={() => setTipoLancamento('despesa')} className={`flex-1 py-2 text-xs font-bold rounded ${tipoLancamento === 'despesa' ? 'bg-red-600 text-white shadow' : 'text-gray-500'}`}>Despesa</button>
@@ -297,40 +351,36 @@ export default function Dashboard({ session }) {
               </div>
 
               <form onSubmit={handleSalvarLancamento}>
-                
-                {/* CAMPOS PADRÃO */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-2">
-                    <input type="text" placeholder={tipoLancamento === 'investimento' ? "Ativo (Ex: CDB, Ações)" : "Descrição"} className={inputClass} value={descricao} onChange={e => setDescricao(e.target.value)} />
+                    <input type="text" placeholder={tipoLancamento === 'investimento' ? "Ativo (Ex: CDB)" : "Descrição"} className={inputClass} value={descricao} onChange={e => setDescricao(e.target.value)} />
                     <input type="number" placeholder="Valor" className={inputClass} value={valor} onChange={e => setValor(e.target.value)} />
                 </div>
 
-                {/* LOGICA ESPECIFICA DE INVESTIMENTO */}
                 {tipoLancamento === 'investimento' && (
                     <div className="bg-blue-50 p-3 rounded-lg border border-blue-100 mb-2">
-                        <p className="text-xs font-bold text-blue-800 mb-2 uppercase">O que você vai fazer?</p>
+                        <p className="text-xs font-bold text-blue-800 mb-2 uppercase">Ação</p>
                         <div className="flex gap-4 mb-3">
-                            <label className="flex items-center gap-2 text-sm cursor-pointer"><input type="radio" name="acao" checked={investAcao === 'aporte'} onChange={() => setInvestAcao('aporte')} /> Aportar (Investir)</label>
-                            <label className="flex items-center gap-2 text-sm cursor-pointer"><input type="radio" name="acao" checked={investAcao === 'resgate'} onChange={() => setInvestAcao('resgate')} /> Resgatar (Sacar)</label>
+                            <label className="flex items-center gap-2 text-sm cursor-pointer"><input type="radio" name="acao" checked={investAcao === 'aporte'} onChange={() => setInvestAcao('aporte')} /> Aportar</label>
+                            <label className="flex items-center gap-2 text-sm cursor-pointer"><input type="radio" name="acao" checked={investAcao === 'resgate'} onChange={() => setInvestAcao('resgate')} /> Resgatar</label>
                         </div>
 
                         {investAcao === 'aporte' && (
                             <div className="space-y-3 pt-2 border-t border-blue-200">
                                 <div>
-                                    <p className="text-[10px] font-bold text-gray-500 uppercase mb-1">Origem do Dinheiro</p>
+                                    <p className="text-[10px] font-bold text-gray-500 uppercase mb-1">Origem</p>
                                     <div className="flex gap-4">
-                                        <label className="flex items-center gap-2 text-xs cursor-pointer"><input type="radio" name="origem" checked={investOrigem === 'saldo'} onChange={() => setInvestOrigem('saldo')} /> Saldo da Conta</label>
-                                        <label className="flex items-center gap-2 text-xs cursor-pointer"><input type="radio" name="origem" checked={investOrigem === 'novo'} onChange={() => setInvestOrigem('novo')} /> Dinheiro Novo (Externo)</label>
+                                        <label className="flex items-center gap-2 text-xs cursor-pointer"><input type="radio" name="origem" checked={investOrigem === 'saldo'} onChange={() => setInvestOrigem('saldo')} /> Conta</label>
+                                        <label className="flex items-center gap-2 text-xs cursor-pointer"><input type="radio" name="origem" checked={investOrigem === 'novo'} onChange={() => setInvestOrigem('novo')} /> Dinheiro Novo</label>
                                     </div>
                                 </div>
-                                <input type="text" list="catInvest" placeholder="Categoria (Ex: Renda Fixa)" className={inputClass} value={categoria} onChange={e => setCategoria(e.target.value)} />
+                                <input type="text" list="catInvest" placeholder="Categoria (Ex: FIIs)" className={inputClass} value={categoria} onChange={e => setCategoria(e.target.value)} />
                                 <datalist id="catInvest"><option value="Renda Fixa"/><option value="Ações"/><option value="FIIs"/><option value="Cripto"/></datalist>
-                                <input type="number" placeholder="Taxa de Retorno (% a.m.)" className={inputClass} value={taxaRetorno} onChange={e => setTaxaRetorno(e.target.value)} />
+                                <input type="number" placeholder="Taxa (% a.m.)" className={inputClass} value={taxaRetorno} onChange={e => setTaxaRetorno(e.target.value)} />
                             </div>
                         )}
                     </div>
                 )}
 
-                {/* CATEGORIA PARA RECEITA/DESPESA */}
                 {tipoLancamento !== 'investimento' && (
                     <div className="mb-2">
                         <input type="text" list="sugestoes" placeholder="Categoria" className={inputClass} value={categoria} onChange={e => setCategoria(e.target.value)} />
@@ -338,7 +388,7 @@ export default function Dashboard({ session }) {
                     </div>
                 )}
 
-                <button className="w-full mt-2 bg-neutral-800 text-white py-3 rounded-lg font-bold hover:bg-neutral-700 text-sm">CONFIRMAR LANÇAMENTO</button>
+                <button className="w-full mt-2 bg-neutral-800 text-white py-3 rounded-lg font-bold hover:bg-neutral-700 text-sm">CONFIRMAR</button>
               </form>
             </div>
 
@@ -377,14 +427,9 @@ export default function Dashboard({ session }) {
                 <div className="space-y-2 max-h-64 overflow-y-auto">
                     {transacoes.map(t => (
                         <div key={t.id} className="flex justify-between items-center border-b py-2 text-sm last:border-0">
-                            <div>
-                                <p className="font-bold">{t.descricao}</p>
-                                <p className="text-[10px] text-gray-500 capitalize">{t.tipo} • {t.categoria} {t.taxa_retorno > 0 ? `(${t.taxa_retorno}%)` : ''}</p>
-                            </div>
+                            <div><p className="font-bold">{t.descricao}</p><p className="text-[10px] text-gray-500 capitalize">{t.tipo} • {t.categoria}</p></div>
                             <div className="text-right">
-                                <p className={`font-bold ${t.tipo === 'despesa' ? 'text-red-500' : t.tipo === 'investimento' ? 'text-blue-600' : 'text-green-600'}`}>
-                                    {t.tipo === 'despesa' ? '-' : '+'} {t.valor}
-                                </p>
+                                <p className={`font-bold ${t.tipo === 'despesa' ? 'text-red-500' : t.tipo === 'investimento' ? 'text-blue-600' : 'text-green-600'}`}>{t.tipo === 'despesa' ? '-' : '+'} {t.valor}</p>
                                 <button onClick={() => handleExcluir(t.id, 'transacoes')} className="text-[10px] text-red-400">Excluir</button>
                             </div>
                         </div>
@@ -412,7 +457,7 @@ export default function Dashboard({ session }) {
                             <span className="font-bold text-sm">{r.descricao}</span>
                             <div className="flex items-center gap-2">
                                 <span className="font-bold text-green-700">R$ {r.valor}</span>
-                                <button onClick={() => lancarIndividual(r, 'receita', 'transacoes')} className="bg-green-100 text-green-700 p-1 rounded hover:bg-green-200" title="Lançar só este">▶️</button>
+                                <button onClick={() => lancarIndividual(r, 'receita', 'transacoes')} className="bg-green-100 text-green-700 p-1 rounded hover:bg-green-200">▶️</button>
                                 <button onClick={() => handleExcluir(r.id, 'receitas_fixas')} className="text-red-400 text-xs ml-2">🗑️</button>
                             </div>
                         </div>
@@ -439,7 +484,7 @@ export default function Dashboard({ session }) {
                             <span className="font-bold text-sm">{f.descricao}</span>
                             <div className="flex items-center gap-2">
                                 <span className="font-bold text-red-700">R$ {f.valor}</span>
-                                <button onClick={() => lancarIndividual(f, 'despesa', 'transacoes')} className="bg-red-100 text-red-700 p-1 rounded hover:bg-red-200" title="Lançar só este">▶️</button>
+                                <button onClick={() => lancarIndividual(f, 'despesa', 'transacoes')} className="bg-red-100 text-red-700 p-1 rounded hover:bg-red-200">▶️</button>
                                 <button onClick={() => handleExcluir(f.id, 'despesas_fixas')} className="text-red-400 text-xs ml-2">🗑️</button>
                             </div>
                         </div>
@@ -455,20 +500,18 @@ export default function Dashboard({ session }) {
                     <h2 className="text-sm font-bold text-blue-800 uppercase">📁 Modelos de Metas (Fixas)</h2>
                     <button onClick={() => lancarMassa(metasFixas, null, 'metas')} className="bg-blue-600 text-white w-full py-3 rounded-lg font-bold text-sm shadow">⬇ IMPORTAR TODAS PARA O MÊS</button>
                 </div>
-                
                 <form onSubmit={handleSalvarMetaFixa} className="flex flex-col md:flex-row gap-2 mb-3 mt-4">
                      <input className={`${inputClass} bg-gray-50 border`} placeholder="Categoria Fixa" value={novaMetaFixa.categoria} onChange={e => setNovaMetaFixa({...novaMetaFixa, categoria: e.target.value})} />
                      <input className={`${inputClass} md:w-32 bg-gray-50 border`} type="number" placeholder="Limite" value={novaMetaFixa.valor_limite} onChange={e => setNovaMetaFixa({...novaMetaFixa, valor_limite: e.target.value})} />
                      <button className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-bold">Add</button>
                 </form>
-
                 <div className="space-y-1">
                     {metasFixas.map(mf => (
                          <div key={mf.id} className="flex justify-between items-center text-xs p-3 bg-white rounded border border-gray-100 shadow-sm">
                              <span className="font-bold text-gray-700">{mf.categoria}</span>
                              <div className="flex gap-2">
                                  <span className="font-bold text-blue-600">R$ {mf.valor_limite}</span>
-                                 <button onClick={() => lancarIndividual(mf, null, 'metas')} className="bg-blue-100 text-blue-700 p-1 rounded hover:bg-blue-200" title="Importar só esta">▶️</button>
+                                 <button onClick={() => lancarIndividual(mf, null, 'metas')} className="bg-blue-100 text-blue-700 p-1 rounded hover:bg-blue-200">▶️</button>
                                  <button onClick={() => handleExcluir(mf.id, 'metas_fixas')} className="text-red-400 ml-2">🗑️</button>
                              </div>
                          </div>
